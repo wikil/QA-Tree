@@ -6,10 +6,13 @@ import {
   Check,
   Eye,
   EyeOff,
+  Loader2,
   Pencil,
   Plus,
+  Square,
   Star,
   Trash2,
+  Zap,
 } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +43,10 @@ import {
   PROVIDER_PRESETS,
   type ProviderPreset,
 } from '@/lib/providerPresets';
+import { streamChat } from '@/lib/llm';
 import type { ProviderConfig, ProxyConfig } from '@/types';
+
+const TEST_PROMPT = '用一句话说明你是哪个模型。';
 
 const providerFormSchema = z.object({
   name: z.string().trim().min(1, '请填写名称'),
@@ -191,6 +197,7 @@ export default function ProvidersPage() {
           <ProvidersSection
             providers={providers}
             defaultProviderId={defaultProviderId}
+            proxy={proxy}
             onCreate={() => openCreate()}
             onEdit={openEdit}
             onDelete={setPendingDelete}
@@ -284,6 +291,7 @@ function PresetsSection({
 function ProvidersSection({
   providers,
   defaultProviderId,
+  proxy,
   onCreate,
   onEdit,
   onDelete,
@@ -291,6 +299,7 @@ function ProvidersSection({
 }: {
   providers: ProviderConfig[];
   defaultProviderId: string | null;
+  proxy: ProxyConfig;
   onCreate: () => void;
   onEdit: (p: ProviderConfig) => void;
   onDelete: (p: ProviderConfig) => void;
@@ -323,6 +332,7 @@ function ProvidersSection({
               key={p.id}
               provider={p}
               isDefault={p.id === defaultProviderId}
+              proxy={proxy}
               onEdit={() => onEdit(p)}
               onDelete={() => onDelete(p)}
               onSetDefault={() => onSetDefault(p.id)}
@@ -334,20 +344,90 @@ function ProvidersSection({
   );
 }
 
+type TestStatus = 'idle' | 'streaming' | 'done' | 'aborted' | 'error';
+
+interface TestState {
+  status: TestStatus;
+  text: string;
+  error?: string;
+  finishReason?: string;
+  model?: string;
+}
+
 function ProviderRow({
   provider,
   isDefault,
+  proxy,
   onEdit,
   onDelete,
   onSetDefault,
 }: {
   provider: ProviderConfig;
   isDefault: boolean;
+  proxy: ProxyConfig;
   onEdit: () => void;
   onDelete: () => void;
   onSetDefault: () => void;
 }) {
   const [revealKey, setRevealKey] = React.useState(false);
+  const [test, setTest] = React.useState<TestState | null>(null);
+  const abortRef = React.useRef<AbortController | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const startTest = async () => {
+    abortRef.current?.abort();
+    const ctl = new AbortController();
+    abortRef.current = ctl;
+    setTest({ status: 'streaming', text: '' });
+    try {
+      const result = await streamChat({
+        provider,
+        proxy,
+        messages: [{ role: 'user', content: TEST_PROMPT }],
+        signal: ctl.signal,
+        onDelta: (_, full) =>
+          setTest((prev) =>
+            prev && prev.status === 'streaming' ? { ...prev, text: full } : prev,
+          ),
+      });
+      if (ctl.signal.aborted) {
+        setTest({
+          status: 'aborted',
+          text: result.content,
+          model: result.model,
+        });
+      } else {
+        setTest({
+          status: result.finishReason === 'abort' ? 'aborted' : 'done',
+          text: result.content,
+          finishReason: result.finishReason,
+          model: result.model,
+        });
+      }
+    } catch (e) {
+      setTest({
+        status: 'error',
+        text: '',
+        error: (e as Error).message,
+      });
+    } finally {
+      if (abortRef.current === ctl) abortRef.current = null;
+    }
+  };
+
+  const stopTest = () => abortRef.current?.abort();
+  const closeTest = () => {
+    abortRef.current?.abort();
+    setTest(null);
+  };
+
+  const testing = test?.status === 'streaming';
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
@@ -375,6 +455,22 @@ function ProviderRow({
               <Star className="h-4 w-4" /> 设为默认
             </Button>
           ) : null}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={testing ? stopTest : startTest}
+            title={testing ? '中止测试' : '测试连接 / 测试流式'}
+          >
+            {testing ? (
+              <>
+                <Square className="h-4 w-4" /> 中止
+              </>
+            ) : (
+              <>
+                <Zap className="h-4 w-4" /> 测试
+              </>
+            )}
+          </Button>
           <Button size="icon" variant="ghost" onClick={onEdit} aria-label="编辑">
             <Pencil className="h-4 w-4" />
           </Button>
@@ -433,7 +529,94 @@ function ProviderRow({
           />
         ) : null}
       </CardContent>
+      {test ? (
+        <TestPanel
+          state={test}
+          proxyEnabled={proxy.enabled}
+          onStop={stopTest}
+          onRetry={startTest}
+          onClose={closeTest}
+        />
+      ) : null}
     </Card>
+  );
+}
+
+function TestPanel({
+  state,
+  proxyEnabled,
+  onStop,
+  onRetry,
+  onClose,
+}: {
+  state: TestState;
+  proxyEnabled: boolean;
+  onStop: () => void;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  const isStreaming = state.status === 'streaming';
+  const isError = state.status === 'error';
+  const isAborted = state.status === 'aborted';
+
+  return (
+    <div className="border-t border-border bg-muted/30 px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-2">
+          {isStreaming ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              <span className="text-muted-foreground">流式中…</span>
+            </>
+          ) : isError ? (
+            <span className="font-medium text-destructive">连接失败</span>
+          ) : isAborted ? (
+            <span className="font-medium text-amber-700 dark:text-amber-300">已中止</span>
+          ) : (
+            <span className="font-medium text-emerald-700 dark:text-emerald-300">
+              连接成功
+            </span>
+          )}
+          {state.model ? (
+            <span className="rounded bg-background px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              {state.model}
+            </span>
+          ) : null}
+          {proxyEnabled ? (
+            <span className="rounded bg-background px-1.5 py-0.5 text-[11px] text-muted-foreground">
+              via proxy
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-1">
+          {isStreaming ? (
+            <Button size="sm" variant="ghost" onClick={onStop}>
+              <Square className="h-3.5 w-3.5" /> 中止
+            </Button>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={onRetry}>
+              <Zap className="h-3.5 w-3.5" /> 重新测试
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            关闭
+          </Button>
+        </div>
+      </div>
+      {isError ? (
+        <pre className="overflow-auto whitespace-pre-wrap break-words rounded border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+          {state.error || '未知错误'}
+        </pre>
+      ) : (
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-background p-2 font-sans text-sm leading-relaxed">
+          {state.text || (isStreaming ? '等待第一个 token…' : '（无输出）')}
+          {isStreaming ? <span className="ml-0.5 animate-pulse">▍</span> : null}
+        </pre>
+      )}
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        测试 prompt：{TEST_PROMPT}
+      </p>
+    </div>
   );
 }
 
