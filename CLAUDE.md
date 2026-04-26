@@ -51,6 +51,7 @@ pnpm proxy        # 可选 CORS 兜底，仅监听 127.0.0.1:8787
 - **不做范围外功能**：设计文档"后续版本待办"列表（文本选中级分叉、编辑历史、JSON 导入导出、PWA、Mermaid、主密码加密…）一律不在本次实现，遇到需求先记 ROADMAP。
 - **No Breaking Changes to data schema**：Dexie 表结构改动必带版本迁移并验证旧数据；types/ 与 lib/db.ts 必须同步。
 - **Git commit 前缀**：`[FE]`（前端）/ `[PROXY]`（可选 proxy）/ `[ROOT]`（配置/文档）。
+- **前端设计走 `frontend-design` skill**：涉及 UI/视觉/组件/页面/交互的设计或实现（新建组件、画布样式、主题、节点/边样式、shadcn 组合、布局打磨等），必须调用 `frontend-design` skill 产出，不要凭直觉手写避免落入 AI 通用样式。
 
 ## Design Doc Context
 
