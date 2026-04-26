@@ -43,16 +43,18 @@ function PromptEdgeComponent({
     targetX,
     targetY,
     targetPosition,
-    borderRadius: 0,
+    borderRadius: 8,
     offset: 24,
   });
 
-  // Anchor the label on the horizontal segment between ranks. Even when
-  // source and target sit on different rows, smoothstep routes via a vertical
-  // joint at the midpoint of x; the label hangs above source's row near the
-  // outgoing edge, where there's always clean space.
+  // Sibling edges share sourceX/sourceY/targetX — only targetY is unique per
+  // sibling. So we pin labelY into the vertical corridor between source and
+  // target rows; each sibling's label naturally lands at a different Y and
+  // they never stack. For same-row edges this collapses to the horizontal
+  // line, with the -50%/-50% transform lifting the label over the stroke.
   const labelX = sourceX + (targetX - sourceX) * 0.5;
-  const labelY = sourceY;
+  const sameRow = Math.abs(targetY - sourceY) < 1;
+  const labelY = sameRow ? sourceY - 12 : (sourceY + targetY) / 2;
 
   const active = selected || isOnPath;
   const dimmed = hasSelection && !active;
@@ -74,15 +76,15 @@ function PromptEdgeComponent({
       <EdgeLabelRenderer>
         <div
           style={{
-            transform: `translate(-50%, -100%) translate(${labelX}px, ${labelY - 10}px)`,
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
           }}
           className={cn(
             'pointer-events-auto absolute select-none whitespace-nowrap',
-            'px-1.5 py-[1px]',
+            'rounded-[2px] bg-background/85 px-1.5 py-[2px] backdrop-blur-[1px]',
             'font-mono text-[10px] tracking-[0.02em] leading-none',
             active
               ? 'text-accent'
-              : 'text-foreground/65',
+              : 'text-foreground/70',
             dimmed && 'opacity-30',
           )}
         >
