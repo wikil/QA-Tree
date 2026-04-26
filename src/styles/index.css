@@ -4,48 +4,65 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    /* Parchment / ink palette — warm cream paper, deep ink charcoal */
+    --background: 36 30% 94%;
+    --foreground: 30 10% 12%;
+    --card: 36 35% 97%;
+    --card-foreground: 30 10% 12%;
+    --popover: 36 35% 97%;
+    --popover-foreground: 30 10% 12%;
+    --primary: 30 12% 14%;
+    --primary-foreground: 36 30% 96%;
+    --secondary: 32 18% 88%;
+    --secondary-foreground: 30 12% 14%;
+    --muted: 32 18% 90%;
+    --muted-foreground: 30 8% 38%;
+    --accent: 22 70% 44%;        /* ember saffron — single sharp accent */
+    --accent-foreground: 36 30% 96%;
+    --destructive: 6 70% 44%;
+    --destructive-foreground: 36 30% 96%;
+    --border: 32 14% 80%;
+    --hairline: 30 12% 28%;      /* near-ink hairline for sharp strokes */
+    --input: 32 14% 80%;
+    --ring: 22 70% 44%;
+    --radius: 0.25rem;
+
+    /* Canvas-specific */
+    --canvas-bg: 36 28% 92%;
+    --canvas-grid: 32 18% 84%;
+    --node-shadow: 30 25% 18%;
+
+    --font-display: 'Fraunces', 'EB Garamond', 'Songti SC', Georgia, serif;
+    --font-body: 'Geist', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    /* Graphite / copper — late-night reading-room mode */
+    --background: 30 8% 7%;
+    --foreground: 36 22% 90%;
+    --card: 30 8% 9%;
+    --card-foreground: 36 22% 90%;
+    --popover: 30 8% 9%;
+    --popover-foreground: 36 22% 90%;
+    --primary: 36 22% 90%;
+    --primary-foreground: 30 8% 7%;
+    --secondary: 30 6% 14%;
+    --secondary-foreground: 36 22% 90%;
+    --muted: 30 6% 14%;
+    --muted-foreground: 36 12% 62%;
+    --accent: 24 75% 58%;        /* copper ember in dark */
+    --accent-foreground: 30 8% 7%;
+    --destructive: 6 65% 52%;
+    --destructive-foreground: 36 22% 92%;
+    --border: 30 6% 18%;
+    --hairline: 36 18% 72%;
+    --input: 30 6% 18%;
+    --ring: 24 75% 58%;
+
+    --canvas-bg: 30 8% 6%;
+    --canvas-grid: 30 6% 14%;
+    --node-shadow: 0 0% 0%;
   }
 }
 
@@ -60,8 +77,146 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-      'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC',
-      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    font-family: var(--font-body);
+    font-feature-settings: 'ss01', 'ss02', 'cv11';
+    /* paper grain — barely there, only visible against parchment */
+    background-image:
+      radial-gradient(hsl(var(--canvas-grid) / 0.35) 1px, transparent 1px);
+    background-size: 22px 22px;
+    background-position: 0 0;
+  }
+  .font-display {
+    font-family: var(--font-display);
+    font-feature-settings: 'ss01';
+    letter-spacing: -0.01em;
+  }
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+  ::selection {
+    background: hsl(var(--accent) / 0.35);
+    color: hsl(var(--foreground));
+  }
+}
+
+/* React Flow theming overrides — keep it raw and editorial, not the default rounded-corners look */
+@layer components {
+  .react-flow__renderer {
+    background: hsl(var(--canvas-bg));
+  }
+  .react-flow__background {
+    background-color: hsl(var(--canvas-bg));
+  }
+  .react-flow__edge-path {
+    stroke: hsl(var(--hairline) / 0.45);
+    stroke-width: 1.25;
+    transition: stroke 200ms ease, stroke-width 200ms ease, opacity 200ms ease;
+  }
+  .react-flow__edge.qa-edge--active .react-flow__edge-path {
+    stroke: hsl(var(--accent));
+    stroke-width: 2;
+  }
+  .react-flow__edge.qa-edge--dimmed .react-flow__edge-path {
+    stroke: hsl(var(--hairline) / 0.18);
+  }
+  .react-flow__edge .react-flow__edge-text {
+    fill: hsl(var(--foreground));
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+  .react-flow__edge-textbg {
+    fill: hsl(var(--card));
+  }
+  .react-flow__handle {
+    width: 8px;
+    height: 8px;
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--hairline) / 0.6);
+    border-radius: 9999px;
+    transition: background 150ms ease, border-color 150ms ease;
+  }
+  .react-flow__handle:hover {
+    background: hsl(var(--accent));
+    border-color: hsl(var(--accent));
+  }
+  .react-flow__controls {
+    box-shadow: none !important;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .react-flow__controls-button {
+    background: hsl(var(--card)) !important;
+    border-bottom: 1px solid hsl(var(--border)) !important;
+    color: hsl(var(--foreground)) !important;
+    width: 28px;
+    height: 28px;
+  }
+  .react-flow__controls-button:hover {
+    background: hsl(var(--secondary)) !important;
+  }
+  .react-flow__controls-button svg {
+    fill: hsl(var(--foreground));
+    max-width: 12px;
+    max-height: 12px;
+  }
+  .react-flow__minimap {
+    background: hsl(var(--card)) !important;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+  }
+  .react-flow__attribution {
+    background: transparent !important;
+    color: hsl(var(--muted-foreground)) !important;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    opacity: 0.4;
+  }
+}
+
+@layer utilities {
+  /* fade-mask for clamped node summary */
+  .qa-fade-mask {
+    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  }
+  /* hairline border using the ink color (1px crisp) */
+  .qa-hairline {
+    box-shadow: 0 0 0 1px hsl(var(--hairline) / 0.55);
+  }
+  .qa-hairline-soft {
+    box-shadow: 0 0 0 1px hsl(var(--hairline) / 0.25);
+  }
+  /* embossed parchment card shadow */
+  .qa-card-shadow {
+    box-shadow:
+      0 1px 0 hsl(var(--hairline) / 0.08),
+      0 12px 28px -16px hsl(var(--node-shadow) / 0.35),
+      0 2px 6px -2px hsl(var(--node-shadow) / 0.18);
+  }
+  .qa-card-shadow-active {
+    box-shadow:
+      0 0 0 1.5px hsl(var(--accent)),
+      0 18px 36px -18px hsl(var(--accent) / 0.45),
+      0 4px 12px -4px hsl(var(--node-shadow) / 0.22);
+  }
+  .qa-stream-cursor::after {
+    content: '▍';
+    margin-left: 2px;
+    color: hsl(var(--accent));
+    animation: qa-blink 1s steps(2, end) infinite;
+  }
+  @keyframes qa-blink {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 1; }
+  }
+  @keyframes qa-node-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .qa-node-enter {
+    animation: qa-node-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 }

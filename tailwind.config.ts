@@ -11,8 +11,14 @@ const config: Config = {
       screens: { '2xl': '1400px' },
     },
     extend: {
+      fontFamily: {
+        display: ['var(--font-display)'],
+        sans: ['var(--font-body)'],
+        mono: ['var(--font-mono)'],
+      },
       colors: {
         border: 'hsl(var(--border))',
+        hairline: 'hsl(var(--hairline))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
