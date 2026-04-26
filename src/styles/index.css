@@ -128,17 +128,17 @@
   .react-flow__edge-textbg {
     fill: hsl(var(--card));
   }
-  .react-flow__handle {
-    width: 8px;
-    height: 8px;
-    background: hsl(var(--card));
-    border: 1px solid hsl(var(--hairline) / 0.6);
-    border-radius: 9999px;
-    transition: background 150ms ease, border-color 150ms ease;
-  }
-  .react-flow__handle:hover {
-    background: hsl(var(--accent));
-    border-color: hsl(var(--accent));
+  /* Handles are invisible — edges anchor to them, but we don't render dots.
+     Connection UI is disabled in MVP (nodesConnectable=false). */
+  .react-flow__handle.qa-handle {
+    width: 6px;
+    height: 6px;
+    min-width: 6px;
+    min-height: 6px;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    pointer-events: none;
   }
   .react-flow__controls {
     box-shadow: none !important;

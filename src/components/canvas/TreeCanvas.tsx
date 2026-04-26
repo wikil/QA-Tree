@@ -337,19 +337,16 @@ function TreeCanvasInner({
               pannable
               zoomable
               position="bottom-right"
-              maskColor="hsl(var(--background) / 0.65)"
+              maskColor="hsl(var(--background) / 0.7)"
               nodeColor={(n) =>
                 n.type === 'start'
                   ? 'hsl(var(--accent))'
-                  : 'hsl(var(--card-foreground) / 0.55)'
+                  : 'hsl(var(--foreground) / 0.45)'
               }
-              nodeStrokeColor="hsl(var(--hairline))"
+              nodeStrokeColor="transparent"
               nodeBorderRadius={2}
+              style={{ width: 148, height: 96 }}
             />
-            {/* Editorial corner glyph — bottom-right archival mark */}
-            <div className="pointer-events-none absolute right-3 top-3 font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground/60">
-              QA-Tree · canvas
-            </div>
           </ReactFlow>
         )}
       </div>

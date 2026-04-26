@@ -11,7 +11,7 @@ function StartPillComponent() {
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2 !w-2"
+        className="qa-handle"
         isConnectable={false}
       />
       <div className="flex items-center gap-1.5 rounded-full border border-accent/70 bg-accent/8 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-accent">

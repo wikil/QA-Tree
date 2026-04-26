@@ -5,8 +5,9 @@ export const NODE_WIDTH = 340;
 export const NODE_HEIGHT = 200;
 export const START_PILL_WIDTH = 76;
 export const START_PILL_HEIGHT = 36;
-export const RANK_SEP = 120;
-export const NODE_SEP = 36;
+export const RANK_SEP = 220;
+export const NODE_SEP = 64;
+export const EDGE_SEP = 28;
 
 export interface PositionedNode {
   id: string;
@@ -76,8 +77,10 @@ export function layoutTree(args: {
     rankdir: 'LR',
     ranksep: RANK_SEP,
     nodesep: NODE_SEP,
-    marginx: 48,
-    marginy: 48,
+    edgesep: EDGE_SEP,
+    ranker: 'tight-tree',
+    marginx: 64,
+    marginy: 64,
   });
   g.setDefaultEdgeLabel(() => ({}));
 
