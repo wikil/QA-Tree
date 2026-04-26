@@ -1,4 +1,5 @@
-export type NodeStatus = 'streaming' | 'done' | 'error';
+export type NodeStatus = 'streaming' | 'done' | 'aborted' | 'error';
+export type FinishReason = 'stop' | 'length' | 'abort' | 'error';
 
 export interface Session {
   id: string;
@@ -16,6 +17,7 @@ export interface QANode {
   role: 'root' | 'assistant';
   content: string;
   status: NodeStatus;
+  finishReason?: FinishReason;
   model?: string;
   tokenUsage?: { prompt: number; completion: number };
   errorMessage?: string;

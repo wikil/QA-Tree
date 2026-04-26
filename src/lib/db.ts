@@ -31,4 +31,5 @@ export const KV_KEYS = {
   defaultProviderId: 'settings.defaultProviderId',
   proxy: 'settings.proxy',
   collapsedSubtrees: 'settings.collapsedSubtrees',
+  currentSessionId: 'app.currentSessionId',
 } as const;
