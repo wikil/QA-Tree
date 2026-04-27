@@ -8,6 +8,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 import { summarizeText, formatTokenUsage } from '@/lib/format';
 import type { NodeStatus, QANode } from '@/types';
 
@@ -36,6 +37,7 @@ export const STATUS_BADGE_STYLE: Record<NodeStatus, string> = {
 };
 
 function AnswerNodeComponent({ data }: NodeProps) {
+  const { t } = useI18n();
   const {
     node,
     childCount,
@@ -109,8 +111,8 @@ function AnswerNodeComponent({ data }: NodeProps) {
         <div className="flex items-center gap-0.5 opacity-60 transition-opacity group-hover/node:opacity-100">
           <button
             type="button"
-            aria-label="重新生成"
-            title={isRetryDisabled ? '当前不可重新生成' : '重新生成'}
+            aria-label={t.answer.retry}
+            title={isRetryDisabled ? t.answer.retryDisabled : t.answer.retry}
             disabled={isRetryDisabled}
             onClick={(e) => {
               e.stopPropagation();
@@ -134,7 +136,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
         >
           <AlertTriangle className="h-3 w-3" />
           <span className="flex-1 truncate">
-            {isAborted ? '回答被中止，可能不完整' : node.errorMessage ?? '请求失败'}
+            {isAborted ? t.answer.aborted : node.errorMessage ?? t.answer.requestFailed}
           </span>
           <button
             type="button"
@@ -146,7 +148,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
             }}
             className="font-mono text-[10px] uppercase tracking-wider underline-offset-2 hover:enabled:underline disabled:cursor-not-allowed disabled:opacity-40"
           >
-            重新生成
+            {t.answer.retry}
           </button>
         </div>
       )}
@@ -162,7 +164,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
         >
           {summary || (
             <span className="font-sans text-[12.5px] italic text-muted-foreground/70">
-              {isStreaming ? '正在生成…' : '（空回答）'}
+              {isStreaming ? t.answer.generating : t.answer.emptyAnswer}
             </span>
           )}
         </div>
@@ -185,12 +187,12 @@ function AnswerNodeComponent({ data }: NodeProps) {
               <ChevronDown className="h-3 w-3" />
             )}
             {isCollapsed
-              ? `+${hiddenDescendantCount} 隐藏`
-              : `折叠 ${childCount}`}
+              ? `+${hiddenDescendantCount} ${t.answer.hidden}`
+              : `${t.answer.collapse} ${childCount}`}
           </button>
         ) : (
           <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground/50">
-            leaf
+            {t.answer.leaf}
           </span>
         )}
         <button
@@ -201,14 +203,14 @@ function AnswerNodeComponent({ data }: NodeProps) {
           }}
           className="font-display text-[12px] italic text-muted-foreground hover:text-foreground"
         >
-          展开 →
+          {t.answer.expand}
         </button>
       </div>
 
       {/* Hover branch-adder — slides out from right edge */}
       <button
         type="button"
-        aria-label="新建分支"
+        aria-label={t.answer.addBranch}
         onClick={(e) => {
           e.stopPropagation();
           onAddBranch?.(node.id);

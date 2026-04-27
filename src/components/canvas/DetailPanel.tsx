@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Markdown } from '@/components/Markdown';
 import { useTreeStore } from '@/stores/treeStore';
+import { useI18n } from '@/lib/i18n';
 import { walkPathToRoot } from '@/lib/context';
 import { summarizeText, formatAbsoluteTime, formatTokenUsage } from '@/lib/format';
 import { STATUS_BADGE_STYLE } from './AnswerNode';
@@ -36,6 +37,7 @@ function breadcrumbClass(seg: BreadcrumbSeg, isLast: boolean): string {
 }
 
 export function DetailPanel() {
+  const { t } = useI18n();
   const nodes = useTreeStore((s) => s.nodes);
   const edges = useTreeStore((s) => s.edges);
   const selectedNodeId = useTreeStore((s) => s.selectedNodeId);
@@ -85,13 +87,13 @@ export function DetailPanel() {
         segs.push({
           id: edge.id,
           kind: 'edge',
-          label: `Q${depth + 1} · ${summarizeText(edge.prompt, 18) || '（空 prompt）'}`,
+          label: `Q${depth + 1} · ${summarizeText(edge.prompt, 18) || t.detail.emptyPrompt}`,
         });
       }
     }
     return segs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edges, selectedNodeId, selectedEdgeId]);
+  }, [edges, selectedNodeId, selectedEdgeId, t.detail.emptyPrompt]);
 
   const onDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -175,7 +177,7 @@ export function DetailPanel() {
             ))
           ) : (
             <span className="font-display text-[12px] italic text-muted-foreground/70">
-              （未选中节点 — 点击画布上节点或边查看详情）
+              {t.detail.noSelection}
             </span>
           )}
         </nav>
@@ -188,17 +190,17 @@ export function DetailPanel() {
               setOpen((o) => !o);
             }}
             className="ml-2 flex shrink-0 items-center gap-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground"
-            aria-label={open ? '折叠面板' : '展开面板'}
+            aria-label={open ? t.detail.collapsePanel : t.detail.expandPanel}
           >
             {open ? (
               <>
                 <ChevronDown className="h-3 w-3" />
-                折叠
+                {t.detail.collapse}
               </>
             ) : (
               <>
                 <ChevronUp className="h-3 w-3" />
-                展开
+                {t.detail.expand}
               </>
             )}
           </button>
@@ -213,7 +215,10 @@ export function DetailPanel() {
           {selectedEdge && !selectedNode && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/30 px-8 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
               <span>
-                Q · <span className="text-foreground/80">{selectedEdge.prompt.length} 字</span>
+                Q ·{' '}
+                <span className="text-foreground/80">
+                  {selectedEdge.prompt.length} {t.detail.chars}
+                </span>
               </span>
               <span>{formatAbsoluteTime(selectedEdge.createdAt)}</span>
             </div>
@@ -221,11 +226,11 @@ export function DetailPanel() {
 
           <div className="qa-detail-scroll flex-1 overflow-y-auto px-10 py-6">
             {selectedNode && selectedNode.role !== 'root' && (
-              <Markdown content={selectedNode.content || '*（节点内容为空）*'} />
+              <Markdown content={selectedNode.content || t.detail.emptyNodeMarkdown} />
             )}
             {selectedNode && selectedNode.role === 'root' && (
               <p className="font-display text-[14px] italic text-muted-foreground">
-                这是会话的虚拟 root —— 所有第一问的起点。继续在下方输入你的第一个问题。
+                {t.detail.rootDescription}
               </p>
             )}
             {selectedEdge && !selectedNode && (
@@ -238,14 +243,14 @@ export function DetailPanel() {
                     className="text-foreground hover:text-accent hover:underline underline-offset-2"
                     onClick={() => selectNode(selectedEdge.toNodeId)}
                   >
-                    跳转目标节点 A{trail.filter((s) => s.kind === 'node').length}
+                    {t.detail.jumpTarget} A{trail.filter((s) => s.kind === 'node').length}
                   </button>
                   <button
                     type="button"
                     className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground"
                     onClick={() => selectEdge(null)}
                   >
-                    取消选中 <X className="h-3 w-3" />
+                    {t.detail.cancelSelection} <X className="h-3 w-3" />
                   </button>
                 </div>
               </div>

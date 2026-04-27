@@ -5,7 +5,9 @@ import { TreeCanvas } from '@/components/canvas/TreeCanvas';
 import { DetailPanel } from '@/components/canvas/DetailPanel';
 import { AskBox, type AskBoxHandle } from '@/components/canvas/AskBox';
 import { SessionRow } from '@/components/sidebar/SessionRow';
+import { LanguageToggle } from '@/components/LanguageToggle';
 import { buttonVariants } from '@/components/ui/button';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessionsStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -13,6 +15,7 @@ import { useTreeStore } from '@/stores/treeStore';
 
 export default function App() {
   const askBoxRef = useRef<AskBoxHandle | null>(null);
+  const { t } = useI18n();
 
   const sessions = useSessionsStore((s) => s.sessions);
   const currentSessionId = useSessionsStore((s) => s.currentSessionId);
@@ -47,9 +50,9 @@ export default function App() {
   }, []);
 
   const handleNewSession = useCallback(async () => {
-    await createSession();
+    await createSession(t.app.defaultSessionTitle);
     focusAskBox();
-  }, [createSession, focusAskBox]);
+  }, [createSession, focusAskBox, t.app.defaultSessionTitle]);
 
   // ⌘N / Ctrl+N → new session.  Esc → clear canvas selection (only when no
   // input is focused, so SessionRow rename / AskBox / settings forms can keep
@@ -107,16 +110,19 @@ export default function App() {
               ·v0
             </span>
           </div>
-          <Link
-            to="/settings"
-            aria-label="Settings"
-            className={cn(
-              buttonVariants({ variant: 'ghost', size: 'icon' }),
-              'h-7 w-7',
-            )}
-          >
-            <Settings className="h-4 w-4" />
-          </Link>
+          <div className="flex items-center gap-1.5">
+            <LanguageToggle />
+            <Link
+              to="/settings"
+              aria-label={t.app.settingsAria}
+              className={cn(
+                buttonVariants({ variant: 'ghost', size: 'icon' }),
+                'h-7 w-7',
+              )}
+            >
+              <Settings className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
 
         <div className="border-b border-border px-3 py-2.5">
@@ -131,7 +137,7 @@ export default function App() {
           >
             <span className="flex items-center gap-1.5">
               <Plus className="h-3 w-3" />
-              新建会话
+              {t.app.newSession}
             </span>
             <span className="text-muted-foreground/60">⌘N</span>
           </button>
@@ -144,7 +150,7 @@ export default function App() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索 sessions…"
+              placeholder={t.app.searchPlaceholder}
               className="w-full bg-transparent font-mono text-[11px] tracking-wide text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
             />
           </div>
@@ -153,14 +159,14 @@ export default function App() {
         <div className="flex-1 overflow-y-auto py-1">
           {!sessionsHydrated ? (
             <div className="px-3.5 py-4 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/60">
-              loading…
+              {t.common.loading}
             </div>
           ) : filteredSessions.length === 0 ? (
             <div className="flex flex-col gap-2 px-4 py-6 text-center">
               <span className="font-display text-[13px] italic text-muted-foreground/80">
                 {sessions.length === 0
-                  ? '还没有任何会话。'
-                  : '没有匹配的会话。'}
+                  ? t.app.noSessions
+                  : t.app.noMatchingSessions}
               </span>
               {sessions.length === 0 && (
                 <button
@@ -168,7 +174,7 @@ export default function App() {
                   onClick={() => void handleNewSession()}
                   className="mx-auto mt-1 flex items-center gap-1.5 rounded-[2px] border border-accent/60 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-accent hover:bg-accent hover:text-accent-foreground"
                 >
-                  <Plus className="h-3 w-3" /> 新建第一个会话
+                  <Plus className="h-3 w-3" /> {t.app.newFirstSession}
                 </button>
               )}
             </div>
@@ -191,10 +197,10 @@ export default function App() {
 
         <div className="border-t border-border px-4 py-3">
           <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70">
-            local · indexeddb
+            {t.app.localStoreLabel}
           </p>
           <p className="mt-1 font-display text-[11.5px] italic text-muted-foreground/80">
-            no server, no telemetry.
+            {t.app.localStoreDesc}
           </p>
         </div>
       </aside>
@@ -204,7 +210,7 @@ export default function App() {
           {!settingsHydrated ? (
             <div className="flex h-full w-full items-center justify-center">
               <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-muted-foreground">
-                loading…
+                {t.common.loading}
               </span>
             </div>
           ) : (

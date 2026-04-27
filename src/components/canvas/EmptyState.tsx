@@ -2,18 +2,14 @@ import { useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 import { useTreeStore } from '@/stores/treeStore';
 import { useResolvedProvider } from '@/hooks/useResolvedProvider';
-
-const SAMPLES = [
-  '什么是 transformer 的注意力机制？',
-  '怎么从零理解傅里叶变换？',
-  '股息折现模型 vs 自由现金流估值？',
-];
 
 export function EmptyState() {
   const [value, setValue] = useState('');
   const { session, provider, proxy } = useResolvedProvider();
+  const { t } = useI18n();
   const sendPrompt = useTreeStore((s) => s.sendPrompt);
   const activeStreamSessionId = useTreeStore((s) => s.activeStreamSessionId);
 
@@ -56,11 +52,11 @@ export function EmptyState() {
       <div className="relative w-full max-w-[640px]">
         <div className="mb-6 flex items-baseline gap-3">
           <span className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted-foreground">
-            {session ? `Session · ${session.title.slice(0, 20)}` : 'Session · 未创建'}
+            {session ? `Session · ${session.title.slice(0, 20)}` : t.empty.sessionMissing}
           </span>
           <span className="h-px flex-1 bg-hairline/30" />
           <span className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted-foreground">
-            Recursive Inquiry
+            {t.empty.mode}
           </span>
         </div>
 
@@ -68,14 +64,14 @@ export function EmptyState() {
           className="mb-2 font-display text-[44px] leading-[1.05] text-foreground"
           style={{ fontFeatureSettings: '"ss01"' }}
         >
-          开始你的
-          <span className="italic text-accent"> 第一个 </span>
-          问题。
+          {t.empty.headingPrefix}
+          <span className="italic text-accent">{t.empty.headingAccent}</span>
+          {t.empty.headingSuffix}
         </h1>
         <p className="mb-8 max-w-[480px] text-[14px] leading-[1.65] text-muted-foreground">
-          每一次回答都是一个节点。沿任何节点继续追问，会长出新的分支；
-          兄弟分支彼此完全隔离。
-          <span className="font-mono text-[12.5px] text-foreground/80">⌘↵</span> 发送。
+          {t.empty.description}{' '}
+          <span className="font-mono text-[12.5px] text-foreground/80">⌘↵</span>{' '}
+          {t.empty.sendHint}
         </p>
 
         {noProvider && !noSession && (
@@ -87,7 +83,7 @@ export function EmptyState() {
               'hover:bg-accent hover:text-accent-foreground',
             )}
           >
-            请先配置 Provider <ArrowUpRight className="h-3 w-3" />
+            {t.empty.configureProvider} <ArrowUpRight className="h-3 w-3" />
           </Link>
         )}
 
@@ -109,12 +105,12 @@ export function EmptyState() {
             disabled={disabled}
             placeholder={
               noSession
-                ? '请先创建一个 session…'
+                ? t.empty.noSessionPlaceholder
                 : noProvider
-                ? '请先配置 LLM provider…'
+                ? t.empty.noProviderPlaceholder
                 : blockedByOtherSession
-                ? '另一个 session 正在生成，当前暂不能提问…'
-                : '在这里写下你想深入探索的问题…'
+                ? t.empty.blockedPlaceholder
+                : t.empty.promptPlaceholder
             }
             rows={3}
             className={cn(
@@ -136,13 +132,13 @@ export function EmptyState() {
               'transition-colors',
             )}
           >
-            发送
+            {t.empty.send}
             <ArrowRight className="h-3 w-3" />
           </button>
         </div>
 
         <div className="mt-6 flex flex-wrap gap-2">
-          {SAMPLES.map((s) => (
+          {t.empty.samples.map((s) => (
             <button
               key={s}
               type="button"

@@ -35,7 +35,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { LanguageToggle } from '@/components/LanguageToggle';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useI18n } from '@/lib/i18n';
 import { newId } from '@/lib/ids';
 import { cn } from '@/lib/utils';
 import {
@@ -46,25 +48,30 @@ import {
 import { streamChat } from '@/lib/llm';
 import type { ProviderConfig, ProxyConfig } from '@/types';
 
-const TEST_PROMPT = '用一句话说明你是哪个模型。';
-
-const providerFormSchema = z.object({
-  name: z.string().trim().min(1, '请填写名称'),
-  baseUrl: z
-    .string()
-    .trim()
-    .min(1, '请填写 baseUrl')
-    .refine((v) => /^https?:\/\//.test(v), 'baseUrl 需以 http(s):// 开头'),
-  apiKey: z.string(),
-  defaultModel: z.string().trim().min(1, '请填写默认模型'),
-  systemPrompt: z.string().optional(),
-  temperature: z
-    .number()
-    .min(0)
-    .max(2)
-    .optional(),
-  maxTokens: z.number().int().positive().optional(),
-});
+function providerFormSchema(errors: {
+  nameRequired: string;
+  baseUrlRequired: string;
+  baseUrlProtocol: string;
+  modelRequired: string;
+}) {
+  return z.object({
+    name: z.string().trim().min(1, errors.nameRequired),
+    baseUrl: z
+      .string()
+      .trim()
+      .min(1, errors.baseUrlRequired)
+      .refine((v) => /^https?:\/\//.test(v), errors.baseUrlProtocol),
+    apiKey: z.string(),
+    defaultModel: z.string().trim().min(1, errors.modelRequired),
+    systemPrompt: z.string().optional(),
+    temperature: z
+      .number()
+      .min(0)
+      .max(2)
+      .optional(),
+    maxTokens: z.number().int().positive().optional(),
+  });
+}
 
 type ProviderFormErrors = Partial<Record<keyof ProviderFormValues, string>>;
 
@@ -110,20 +117,24 @@ const formFromProvider = (
   setAsDefault: isDefault,
 });
 
-const formFromPreset = (preset: ProviderPreset): ProviderFormValues => ({
+const formFromPreset = (
+  preset: ProviderPreset,
+  displayName: string = preset.name,
+): ProviderFormValues => ({
   ...blankForm(),
-  name: preset.name,
+  name: displayName,
   baseUrl: preset.baseUrl,
   defaultModel: preset.defaultModel,
 });
 
-function maskApiKey(key: string) {
-  if (!key) return '（未填写）';
+function maskApiKey(key: string, emptyLabel: string) {
+  if (!key) return emptyLabel;
   if (key.length <= 8) return '•'.repeat(key.length);
   return `${key.slice(0, 4)}${'•'.repeat(Math.max(key.length - 8, 4))}${key.slice(-4)}`;
 }
 
 export default function ProvidersPage() {
+  const { t } = useI18n();
   const hydrated = useSettingsStore((s) => s.hydrated);
   const hydrate = useSettingsStore((s) => s.hydrate);
   const providers = useSettingsStore((s) => s.providers);
@@ -146,8 +157,8 @@ export default function ProvidersPage() {
     void hydrate();
   }, [hydrate]);
 
-  const openCreate = (preset?: ProviderPreset) => {
-    setDraftValues(preset ? formFromPreset(preset) : blankForm());
+  const openCreate = (preset?: ProviderPreset, displayName?: string) => {
+    setDraftValues(preset ? formFromPreset(preset, displayName) : blankForm());
     setDraft({ kind: 'create' });
   };
 
@@ -161,7 +172,7 @@ export default function ProvidersPage() {
   if (!hydrated) {
     return (
       <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-        正在加载设置...
+        {t.settings.loading}
       </div>
     );
   }
@@ -172,7 +183,7 @@ export default function ProvidersPage() {
         <div className="flex items-center gap-2">
           <Link
             to="/"
-            aria-label="返回画布"
+            aria-label={t.settings.backToCanvas}
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'icon' }),
               'h-8 w-8',
@@ -180,14 +191,16 @@ export default function ProvidersPage() {
           >
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <h1 className="text-sm font-semibold tracking-tight">设置 · Providers</h1>
+          <h1 className="text-sm font-semibold tracking-tight">{t.settings.title}</h1>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <LanguageToggle />
+          <ThemeToggle />
+        </div>
       </header>
 
       <div className="border-b border-border bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-        API key 仅保存在本机浏览器的 IndexedDB，请勿在不可信设备上使用本工具；
-        如需更高安全性，请等待后续主密码加密功能。
+        {t.settings.security}
       </div>
 
       <main className="flex-1 overflow-y-auto px-6 py-6">
@@ -258,31 +271,35 @@ export default function ProvidersPage() {
 function PresetsSection({
   onPick,
 }: {
-  onPick: (preset: ProviderPreset) => void;
+  onPick: (preset: ProviderPreset, displayName?: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="text-base font-semibold">内置预设</h2>
+        <h2 className="text-base font-semibold">{t.settings.presetsTitle}</h2>
         <p className="text-sm text-muted-foreground">
-          一键填入 baseUrl + 推荐模型，apiKey 仍需自行填写。
+          {t.settings.presetsDescription}
         </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {PROVIDER_PRESETS.map((preset) => (
-          <Button
-            key={preset.name}
-            variant="outline"
-            className="h-auto flex-col items-start gap-1 px-4 py-3 text-left"
-            onClick={() => onPick(preset)}
-          >
-            <span className="text-sm font-medium">{preset.name}</span>
-            <span className="text-xs text-muted-foreground">{preset.baseUrl}</span>
-            {preset.hint ? (
-              <span className="text-xs text-muted-foreground">{preset.hint}</span>
-            ) : null}
-          </Button>
-        ))}
+        {PROVIDER_PRESETS.map((preset) => {
+          const presetText = t.settings.presets[preset.id];
+          return (
+            <Button
+              key={preset.id}
+              variant="outline"
+              className="h-auto flex-col items-start gap-1 px-4 py-3 text-left"
+              onClick={() => onPick(preset, presetText.name)}
+            >
+              <span className="text-sm font-medium">{presetText.name}</span>
+              <span className="text-xs text-muted-foreground">{preset.baseUrl}</span>
+              {'hint' in presetText ? (
+                <span className="text-xs text-muted-foreground">{presetText.hint}</span>
+              ) : null}
+            </Button>
+          );
+        })}
       </div>
     </section>
   );
@@ -305,24 +322,25 @@ function ProvidersSection({
   onDelete: (p: ProviderConfig) => void;
   onSetDefault: (id: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <section className="space-y-3">
       <div className="flex items-end justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold">已保存的 Providers</h2>
+          <h2 className="text-base font-semibold">{t.settings.providersTitle}</h2>
           <p className="text-sm text-muted-foreground">
-            一个为全局默认；新会话使用默认 provider，可在 session 内切换。
+            {t.settings.providersDescription}
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={onCreate}>
-          <Plus className="h-4 w-4" /> 新建
+          <Plus className="h-4 w-4" /> {t.settings.create}
         </Button>
       </div>
 
       {providers.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-8 text-sm text-muted-foreground">
-            还没有 provider，挑一个预设或点 “新建”。
+            {t.settings.noProviders}
           </CardContent>
         </Card>
       ) : (
@@ -369,6 +387,7 @@ function ProviderRow({
   onDelete: () => void;
   onSetDefault: () => void;
 }) {
+  const { t } = useI18n();
   const [revealKey, setRevealKey] = React.useState(false);
   const [test, setTest] = React.useState<TestState | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
@@ -388,7 +407,7 @@ function ProviderRow({
       const result = await streamChat({
         provider,
         proxy,
-        messages: [{ role: 'user', content: TEST_PROMPT }],
+        messages: [{ role: 'user', content: t.settings.testPrompt }],
         signal: ctl.signal,
         onDelta: (_, full) =>
           setTest((prev) =>
@@ -436,7 +455,7 @@ function ProviderRow({
             <span className="truncate">{provider.name}</span>
             {isDefault ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-                <Star className="h-3 w-3 fill-current" /> 默认
+                <Star className="h-3 w-3 fill-current" /> {t.settings.defaultBadge}
               </span>
             ) : null}
           </CardTitle>
@@ -450,35 +469,35 @@ function ProviderRow({
               size="sm"
               variant="ghost"
               onClick={onSetDefault}
-              title="设为默认"
+              title={t.settings.setDefault}
             >
-              <Star className="h-4 w-4" /> 设为默认
+              <Star className="h-4 w-4" /> {t.settings.setDefault}
             </Button>
           ) : null}
           <Button
             size="sm"
             variant="outline"
             onClick={testing ? stopTest : startTest}
-            title={testing ? '中止测试' : '测试连接 / 测试流式'}
+            title={testing ? t.settings.stopTestTitle : t.settings.testTitle}
           >
             {testing ? (
               <>
-                <Square className="h-4 w-4" /> 中止
+                <Square className="h-4 w-4" /> {t.settings.stop}
               </>
             ) : (
               <>
-                <Zap className="h-4 w-4" /> 测试
+                <Zap className="h-4 w-4" /> {t.settings.test}
               </>
             )}
           </Button>
-          <Button size="icon" variant="ghost" onClick={onEdit} aria-label="编辑">
+          <Button size="icon" variant="ghost" onClick={onEdit} aria-label={t.common.edit}>
             <Pencil className="h-4 w-4" />
           </Button>
           <Button
             size="icon"
             variant="ghost"
             onClick={onDelete}
-            aria-label="删除"
+            aria-label={t.common.delete}
             className="text-destructive hover:text-destructive"
           >
             <Trash2 className="h-4 w-4" />
@@ -486,20 +505,22 @@ function ProviderRow({
         </div>
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-        <Field label="默认模型" value={provider.defaultModel || '—'} />
+        <Field label={t.settings.defaultModel} value={provider.defaultModel || '—'} />
         <Field
           label="API Key"
           value={
             <span className="flex items-center gap-1 font-mono">
               <span>
-                {revealKey ? provider.apiKey || '（未填写）' : maskApiKey(provider.apiKey)}
+                {revealKey
+                  ? provider.apiKey || t.common.notFilled
+                  : maskApiKey(provider.apiKey, t.common.notFilled)}
               </span>
               {provider.apiKey ? (
                 <button
                   type="button"
                   onClick={() => setRevealKey((v) => !v)}
                   className="text-muted-foreground hover:text-foreground"
-                  aria-label={revealKey ? '隐藏' : '显示'}
+                  aria-label={revealKey ? t.settings.hidden : t.settings.show}
                 >
                   {revealKey ? (
                     <EyeOff className="h-3.5 w-3.5" />
@@ -533,6 +554,7 @@ function ProviderRow({
         <TestPanel
           state={test}
           proxyEnabled={proxy.enabled}
+          testPrompt={t.settings.testPrompt}
           onStop={stopTest}
           onRetry={startTest}
           onClose={closeTest}
@@ -545,16 +567,19 @@ function ProviderRow({
 function TestPanel({
   state,
   proxyEnabled,
+  testPrompt,
   onStop,
   onRetry,
   onClose,
 }: {
   state: TestState;
   proxyEnabled: boolean;
+  testPrompt: string;
   onStop: () => void;
   onRetry: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const isStreaming = state.status === 'streaming';
   const isError = state.status === 'error';
   const isAborted = state.status === 'aborted';
@@ -566,15 +591,17 @@ function TestPanel({
           {isStreaming ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-              <span className="text-muted-foreground">流式中…</span>
+              <span className="text-muted-foreground">{t.settings.testing}</span>
             </>
           ) : isError ? (
-            <span className="font-medium text-destructive">连接失败</span>
+            <span className="font-medium text-destructive">{t.settings.connectionFailed}</span>
           ) : isAborted ? (
-            <span className="font-medium text-amber-700 dark:text-amber-300">已中止</span>
+            <span className="font-medium text-amber-700 dark:text-amber-300">
+              {t.settings.aborted}
+            </span>
           ) : (
             <span className="font-medium text-emerald-700 dark:text-emerald-300">
-              连接成功
+              {t.settings.connected}
             </span>
           )}
           {state.model ? (
@@ -591,30 +618,30 @@ function TestPanel({
         <div className="flex items-center gap-1">
           {isStreaming ? (
             <Button size="sm" variant="ghost" onClick={onStop}>
-              <Square className="h-3.5 w-3.5" /> 中止
+              <Square className="h-3.5 w-3.5" /> {t.settings.stop}
             </Button>
           ) : (
             <Button size="sm" variant="ghost" onClick={onRetry}>
-              <Zap className="h-3.5 w-3.5" /> 重新测试
+              <Zap className="h-3.5 w-3.5" /> {t.settings.retryTest}
             </Button>
           )}
           <Button size="sm" variant="ghost" onClick={onClose}>
-            关闭
+            {t.common.close}
           </Button>
         </div>
       </div>
       {isError ? (
         <pre className="overflow-auto whitespace-pre-wrap break-words rounded border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-          {state.error || '未知错误'}
+          {state.error || t.settings.unknownError}
         </pre>
       ) : (
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-background p-2 font-sans text-sm leading-relaxed">
-          {state.text || (isStreaming ? '等待第一个 token…' : '（无输出）')}
+          {state.text || (isStreaming ? t.settings.waitingFirstToken : t.common.noOutput)}
           {isStreaming ? <span className="ml-0.5 animate-pulse">▍</span> : null}
         </pre>
       )}
       <p className="mt-1 text-[11px] text-muted-foreground">
-        测试 prompt：{TEST_PROMPT}
+        {t.settings.testPromptLabel}: {testPrompt}
       </p>
     </div>
   );
@@ -646,25 +673,31 @@ function ProxySection({
   proxy: ProxyConfig;
   onChange: (proxy: ProxyConfig) => void;
 }) {
+  const { t } = useI18n();
+  const [beforeProxy, afterProxyRaw = ''] =
+    t.settings.proxyDescription.split('{proxyCommand}');
+  const [betweenCommands, afterOllama = ''] =
+    afterProxyRaw.split('{ollamaCommand}');
+
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="text-base font-semibold">本地 Proxy（可选 CORS 兜底）</h2>
+        <h2 className="text-base font-semibold">{t.settings.proxyTitle}</h2>
         <p className="text-sm text-muted-foreground">
-          浏览器直连大多数 OpenAI 兼容服务都可用；如遇 CORS，可在本仓库执行
+          {beforeProxy}
           <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">pnpm proxy</code>
-          启动本地 proxy；Ollama 也可设
+          {betweenCommands}
           <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">OLLAMA_ORIGINS=*</code>
-          直接放行。
+          {afterOllama}
         </p>
       </div>
       <Card>
         <CardContent className="flex flex-col gap-4 pt-4">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="proxy-enabled" className="flex flex-col gap-1">
-              <span>启用本地 proxy</span>
+              <span>{t.settings.enableProxy}</span>
               <span className="text-xs font-normal text-muted-foreground">
-                启用后所有 LLM 请求转发到下方 URL
+                {t.settings.enableProxyDescription}
               </span>
             </Label>
             <Switch
@@ -708,6 +741,7 @@ function ProviderFormDialog({
   onCancel,
   onSubmit,
 }: ProviderFormDialogProps) {
+  const { t } = useI18n();
   const [errors, setErrors] = React.useState<ProviderFormErrors>({});
   const [revealKey, setRevealKey] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
@@ -733,16 +767,16 @@ function ProviderFormDialog({
     const maxNum = maxInput === '' ? undefined : Number(maxInput);
     const localErrors: ProviderFormErrors = {};
     if (tempInput !== '' && (Number.isNaN(tempNum) || tempNum! < 0 || tempNum! > 2)) {
-      localErrors.temperatureInput = 'temperature 应为 0–2';
+      localErrors.temperatureInput = t.settings.errors.temperatureRange;
     }
     if (
       maxInput !== '' &&
       (Number.isNaN(maxNum) || !Number.isInteger(maxNum) || maxNum! <= 0)
     ) {
-      localErrors.maxTokensInput = 'maxTokens 应为正整数';
+      localErrors.maxTokensInput = t.settings.errors.maxTokensPositive;
     }
 
-    const parsed = providerFormSchema.safeParse({
+    const parsed = providerFormSchema(t.settings.errors).safeParse({
       name: values.name,
       baseUrl: values.baseUrl,
       apiKey: values.apiKey,
@@ -774,7 +808,7 @@ function ProviderFormDialog({
     }
   };
 
-  const title = mode?.kind === 'edit' ? '编辑 Provider' : '新建 Provider';
+  const title = mode?.kind === 'edit' ? t.settings.editProvider : t.settings.newProvider;
 
   return (
     <Dialog
@@ -787,16 +821,16 @@ function ProviderFormDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            字段对齐 OpenAI 兼容协议；apiKey 留在本机 IndexedDB，不会上传。
+            {t.settings.formDescription}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <FieldRow label="名称" htmlFor="provider-name" error={errors.name}>
+          <FieldRow label={t.settings.name} htmlFor="provider-name" error={errors.name}>
             <Input
               id="provider-name"
               value={values.name}
               onChange={(e) => update('name', e.target.value)}
-              placeholder="例如 OpenAI"
+              placeholder={t.settings.namePlaceholder}
               autoFocus
             />
           </FieldRow>
@@ -817,7 +851,7 @@ function ProviderFormDialog({
                 type={revealKey ? 'text' : 'password'}
                 value={values.apiKey}
                 onChange={(e) => update('apiKey', e.target.value)}
-                placeholder="sk-... ( Ollama 本地可留空 )"
+                placeholder={t.settings.apiKeyPlaceholder}
                 spellCheck={false}
                 autoComplete="off"
                 className="font-mono"
@@ -827,14 +861,14 @@ function ProviderFormDialog({
                 variant="outline"
                 size="icon"
                 onClick={() => setRevealKey((v) => !v)}
-                aria-label={revealKey ? '隐藏 key' : '显示 key'}
+                aria-label={revealKey ? t.settings.hideKey : t.settings.showKey}
               >
                 {revealKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </Button>
             </div>
           </FieldRow>
           <FieldRow
-            label="默认模型"
+            label={t.settings.defaultModel}
             htmlFor="provider-model"
             error={errors.defaultModel}
           >
@@ -854,7 +888,7 @@ function ProviderFormDialog({
             </datalist>
           </FieldRow>
           <FieldRow
-            label="systemPrompt（可选）"
+            label={t.settings.systemPromptLabel}
             htmlFor="provider-system"
             error={errors.systemPrompt}
           >
@@ -862,13 +896,13 @@ function ProviderFormDialog({
               id="provider-system"
               value={values.systemPrompt}
               onChange={(e) => update('systemPrompt', e.target.value)}
-              placeholder="可在每次会话前注入的 system 消息"
+              placeholder={t.settings.systemPromptPlaceholder}
               rows={3}
             />
           </FieldRow>
           <div className="grid grid-cols-2 gap-3">
             <FieldRow
-              label="temperature（可选 0–2）"
+              label={t.settings.temperatureLabel}
               htmlFor="provider-temp"
               error={errors.temperatureInput}
             >
@@ -880,11 +914,11 @@ function ProviderFormDialog({
                 max={2}
                 value={values.temperatureInput}
                 onChange={(e) => update('temperatureInput', e.target.value)}
-                placeholder="留空使用 provider 默认"
+                placeholder={t.settings.temperaturePlaceholder}
               />
             </FieldRow>
             <FieldRow
-              label="maxTokens（可选）"
+              label={t.settings.maxTokensLabel}
               htmlFor="provider-max"
               error={errors.maxTokensInput}
             >
@@ -895,7 +929,7 @@ function ProviderFormDialog({
                 step={1}
                 value={values.maxTokensInput}
                 onChange={(e) => update('maxTokensInput', e.target.value)}
-                placeholder="留空不发送"
+                placeholder={t.settings.maxTokensPlaceholder}
               />
             </FieldRow>
           </div>
@@ -906,16 +940,16 @@ function ProviderFormDialog({
               onChange={(e) => update('setAsDefault', e.target.checked)}
               className="h-4 w-4 rounded border-input accent-primary"
             />
-            保存后设为全局默认
+            {t.settings.setAsDefaultAfterSave}
           </label>
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onCancel}>
-              取消
+              {t.common.cancel}
             </Button>
             <Button type="submit" disabled={submitting}>
               <Check className="h-4 w-4" />
-              {submitting ? '保存中…' : '保存'}
+              {submitting ? t.common.saving : t.common.save}
             </Button>
           </DialogFooter>
         </form>
@@ -953,6 +987,7 @@ function DeleteConfirmDialog({
   onCancel: () => void;
   onConfirm: () => Promise<void>;
 }) {
+  const { locale, t } = useI18n();
   const [pending, setPending] = React.useState(false);
   return (
     <Dialog
@@ -963,14 +998,24 @@ function DeleteConfirmDialog({
     >
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>删除 Provider</DialogTitle>
+          <DialogTitle>{t.settings.deleteProvider}</DialogTitle>
           <DialogDescription>
-            将永久删除 “{provider?.name}”，此操作不可撤销。
+            {locale === 'zh' ? (
+              <>
+                {t.settings.deleteProviderDescriptionPrefix} “{provider?.name}”，
+                {t.settings.deleteProviderDescriptionSuffix}
+              </>
+            ) : (
+              <>
+                {t.settings.deleteProviderDescriptionPrefix} “{provider?.name}”.{' '}
+                {t.settings.deleteProviderDescriptionSuffix}
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={onCancel}>
-            取消
+            {t.common.cancel}
           </Button>
           <Button
             type="button"
@@ -986,7 +1031,7 @@ function DeleteConfirmDialog({
             }}
           >
             <Trash2 className="h-4 w-4" />
-            {pending ? '删除中…' : '确认删除'}
+            {pending ? t.settings.deleting : t.settings.confirmDelete}
           </Button>
         </DialogFooter>
       </DialogContent>

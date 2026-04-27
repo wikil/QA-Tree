@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useTreeStore } from '@/stores/treeStore';
 import { useSessionsStore } from '@/stores/sessionsStore';
 import { useResolvedProvider } from '@/hooks/useResolvedProvider';
+import { useI18n } from '@/lib/i18n';
 import { walkPathToRoot } from '@/lib/context';
 import { summarizeText } from '@/lib/format';
 
@@ -23,17 +24,25 @@ function placeholderFor(opts: {
   noProvider: boolean;
   blockedByOtherSession: boolean;
   parentStreaming: boolean;
+  labels: {
+    noSessionPlaceholder: string;
+    noProviderPlaceholder: string;
+    blockedPlaceholder: string;
+    parentStreamingPlaceholder: string;
+    promptPlaceholder: string;
+  };
 }): string {
-  if (opts.noSession) return '请先创建或选择一个 session…';
-  if (opts.noProvider) return '请先在设置中配置 LLM provider…';
-  if (opts.blockedByOtherSession) return '另一个 session 正在生成，当前暂不能提问…';
-  if (opts.parentStreaming) return '当前节点仍在生成，完成或中止后再继续…';
-  return '继续推问，⌘↵ 送出…';
+  if (opts.noSession) return opts.labels.noSessionPlaceholder;
+  if (opts.noProvider) return opts.labels.noProviderPlaceholder;
+  if (opts.blockedByOtherSession) return opts.labels.blockedPlaceholder;
+  if (opts.parentStreaming) return opts.labels.parentStreamingPlaceholder;
+  return opts.labels.promptPlaceholder;
 }
 
 export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [draft, setDraft] = useState('');
+  const { t } = useI18n();
 
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
@@ -68,14 +77,14 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
   }, [parent?.id, edges]);
 
   const banner: BannerKind = useMemo(() => {
-    if (!loadedSessionId) return { variant: 'no-session', label: '无活动 session' };
-    if (!parent) return { variant: 'idle', label: 'root · 第一问' };
-    if (parent.role === 'root') return { variant: 'idle', label: 'root · 第一问' };
+    if (!loadedSessionId) return { variant: 'no-session', label: t.ask.noActiveSession };
+    if (!parent) return { variant: 'idle', label: t.ask.rootFirstQuestion };
+    if (parent.role === 'root') return { variant: 'idle', label: t.ask.rootFirstQuestion };
     const summary = summarizeText(parent.content, 24);
-    const label = `A${parentDepth} · ${summary || '（空回答）'}`;
+    const label = `A${parentDepth} · ${summary || t.ask.emptyAnswer}`;
     if (parent.status === 'aborted') return { variant: 'aborted', label };
     return { variant: 'idle', label };
-  }, [loadedSessionId, parent, parentDepth]);
+  }, [loadedSessionId, parent, parentDepth, t.ask.emptyAnswer, t.ask.noActiveSession, t.ask.rootFirstQuestion]);
 
   const streamingNodeId = streamingNodeIds.size > 0 ? streamingNodeIds.values().next().value ?? null : null;
   const streamingNode = streamingNodeId ? nodes.get(streamingNodeId) : undefined;
@@ -119,7 +128,7 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
           </span>
           <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
-            {activeStreamSession?.title ?? '另一个 session'} 正在生成 · 当前 session 暂停提问
+            {activeStreamSession?.title ?? t.ask.otherSession} {t.ask.generatingPaused}
           </span>
         </div>
       )}
@@ -131,7 +140,8 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
           </span>
           <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
-            正在生成 {streamingCount} 个 ↳ {streamingNode?.model ?? '…'} · {streamingNode?.content.length ?? 0} 字
+            {t.ask.generating} {streamingCount} ↳ {streamingNode?.model ?? '…'} ·{' '}
+            {streamingNode?.content.length ?? 0} {t.ask.chars}
           </span>
           <button
             type="button"
@@ -142,7 +152,8 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
             }
             className="ml-auto flex items-center gap-1 rounded-[2px] border border-accent/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-accent hover:bg-accent hover:text-accent-foreground"
           >
-            {streamingCount > 1 ? '中止全部' : '中止'} <X className="h-2.5 w-2.5" />
+            {streamingCount > 1 ? t.ask.abortAll : t.ask.abort}{' '}
+            <X className="h-2.5 w-2.5" />
           </button>
         </div>
       )}
@@ -153,7 +164,7 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
             className="flex items-center gap-1.5 normal-case tracking-normal text-accent"
             style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic' }}
           >
-            <AlertTriangle className="h-3 w-3" /> {banner.label} 已中止 · 续问将带入残段
+            <AlertTriangle className="h-3 w-3" /> {banner.label} {t.ask.abortedCarry}
           </span>
         ) : banner.variant === 'no-session' ? (
           <span>{banner.label}</span>
@@ -178,6 +189,7 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
             noProvider,
             blockedByOtherSession,
             parentStreaming,
+            labels: t.ask,
           })}
           className={cn(
             'flex-1 resize-none bg-transparent px-0 py-1.5 text-[14.5px] leading-[1.55] outline-none',
@@ -195,7 +207,7 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
               'hover:bg-accent hover:text-accent-foreground',
             )}
           >
-            配置 Provider <ArrowUpRight className="h-3 w-3" />
+            {t.ask.configureProvider} <ArrowUpRight className="h-3 w-3" />
           </Link>
         ) : (
           <button
@@ -210,7 +222,7 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
               'hover:enabled:border-accent hover:enabled:bg-accent hover:enabled:text-accent-foreground',
             )}
           >
-            送出
+            {t.ask.send}
             <span className="flex items-center gap-0.5 text-[9px] tracking-[0.22em] opacity-60 group-hover/send:opacity-100">
               ⌘<CornerDownLeft className="h-2.5 w-2.5" />
             </span>

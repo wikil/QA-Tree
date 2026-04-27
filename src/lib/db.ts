@@ -30,6 +30,7 @@ export const db = new QATreeDB();
 export const KV_KEYS = {
   defaultProviderId: 'settings.defaultProviderId',
   proxy: 'settings.proxy',
+  locale: 'settings.locale',
   collapsedSubtrees: 'settings.collapsedSubtrees',
   currentSessionId: 'app.currentSessionId',
 } as const;

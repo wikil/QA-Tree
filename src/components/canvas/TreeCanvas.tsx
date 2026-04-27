@@ -28,6 +28,7 @@ import {
 import { pathHighlight, EMPTY_HIGHLIGHT } from './pathHighlight';
 import { useTreeStore } from '@/stores/treeStore';
 import { useResolvedProvider } from '@/hooks/useResolvedProvider';
+import { useI18n } from '@/lib/i18n';
 import { walkPathToRoot } from '@/lib/context';
 import { summarizeText } from '@/lib/format';
 import type { QANode } from '@/types';
@@ -47,7 +48,8 @@ interface TreeCanvasProps {
 
 function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
   const { session, provider, proxy } = useResolvedProvider();
-  const sessionTitle = session?.title ?? '（未命名会话）';
+  const { t } = useI18n();
+  const sessionTitle = session?.title ?? t.app.defaultSessionTitle;
   const rootNodeId = session?.rootNodeId ?? '';
 
   const nodesMap = useTreeStore((s) => s.nodes);

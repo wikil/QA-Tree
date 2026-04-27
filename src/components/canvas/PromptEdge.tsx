@@ -6,6 +6,7 @@ import {
   type EdgeProps,
 } from '@xyflow/react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 
 export interface PromptEdgeData {
   prompt: string;
@@ -33,6 +34,7 @@ function PromptEdgeComponent({
   data,
   selected,
 }: EdgeProps) {
+  const { t } = useI18n();
   const edgeData = (data ?? {}) as PromptEdgeData;
   const { prompt = '', isOnPath = false, hasSelection = false } = edgeData;
 
@@ -97,7 +99,7 @@ function PromptEdgeComponent({
           >
             Q
           </span>
-          {truncate(prompt) || '（空）'}
+          {truncate(prompt) || t.detail.emptyPrompt}
         </div>
       </EdgeLabelRenderer>
     </>

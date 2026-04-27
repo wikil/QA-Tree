@@ -1,5 +1,6 @@
 export type NodeStatus = 'streaming' | 'done' | 'aborted' | 'error';
 export type FinishReason = 'stop' | 'length' | 'abort' | 'error';
+export type Locale = 'zh' | 'en';
 
 export interface Session {
   id: string;

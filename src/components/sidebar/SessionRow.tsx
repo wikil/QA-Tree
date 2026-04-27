@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatRelativeTime } from '@/lib/format';
+import { formatRelativeTimeForLocale, useI18n } from '@/lib/i18n';
 import {
   Dialog,
   DialogContent,
@@ -34,6 +34,7 @@ export function SessionRow({
   nodeCount,
   onSelect,
 }: SessionRowProps) {
+  const { locale, t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -78,17 +79,19 @@ export function SessionRow({
     <span className="flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
       {nodeCount !== undefined && (
         <>
-          <span>{Math.max(0, nodeCount - 1)} nodes</span>
+          <span>
+            {Math.max(0, nodeCount - 1)} {t.sessionRow.nodes}
+          </span>
           <span className="text-muted-foreground/40">·</span>
         </>
       )}
       {isStreaming && (
         <>
-          <span className="text-accent">streaming</span>
+          <span className="text-accent">{t.sessionRow.streaming}</span>
           <span className="text-muted-foreground/40">·</span>
         </>
       )}
-      <span>{formatRelativeTime(session.updatedAt)}</span>
+      <span>{formatRelativeTimeForLocale(session.updatedAt, locale)}</span>
     </span>
   );
 
@@ -146,7 +149,7 @@ export function SessionRow({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label="会话操作"
+                aria-label={t.sessionRow.actions}
                 onClick={(e) => e.stopPropagation()}
                 className={cn(
                   'absolute right-1.5 top-2 grid h-6 w-6 place-items-center rounded-[2px]',
@@ -160,14 +163,14 @@ export function SessionRow({
             <DropdownMenuContent align="end" sideOffset={4} className="w-36">
               <DropdownMenuItem onSelect={() => startEditing()}>
                 <Pencil className="mr-2 h-3 w-3" />
-                重命名
+                {t.sessionRow.rename}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => setConfirmOpen(true)}
                 className="text-destructive focus:bg-destructive/10 focus:text-destructive"
               >
                 <Trash2 className="mr-2 h-3 w-3" />
-                删除
+                {t.sessionRow.delete}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -178,13 +181,13 @@ export function SessionRow({
         <DialogContent className="max-w-[420px] border-hairline/60 bg-card">
           <DialogHeader>
             <DialogTitle className="font-display text-[20px] italic">
-              删除会话？
+              {t.sessionRow.deleteTitle}
             </DialogTitle>
             <DialogDescription className="text-[13px] leading-[1.65]">
               <span className="font-display italic text-foreground">
                 「{session.title}」
               </span>{' '}
-              及其全部节点和边将被永久删除，无法恢复。
+              {t.sessionRow.deleteDescriptionSuffix}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -193,7 +196,7 @@ export function SessionRow({
               onClick={() => setConfirmOpen(false)}
               className="rounded-[2px] border border-hairline/60 px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:border-hairline hover:text-foreground"
             >
-              取消
+              {t.common.cancel}
             </button>
             <button
               type="button"
@@ -203,7 +206,7 @@ export function SessionRow({
               }}
               className="rounded-[2px] border border-destructive/60 bg-destructive/10 px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.18em] text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground"
             >
-              永久删除
+              {t.sessionRow.permanentDelete}
             </button>
           </DialogFooter>
         </DialogContent>

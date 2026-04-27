@@ -1,4 +1,7 @@
+export type ProviderPresetId = 'openai' | 'deepseek' | 'moonshot' | 'ollama';
+
 export interface ProviderPreset {
+  id: ProviderPresetId;
   name: string;
   baseUrl: string;
   defaultModel: string;
@@ -7,21 +10,25 @@ export interface ProviderPreset {
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
+    id: 'openai',
     name: 'OpenAI 官方',
     baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-4o-mini',
   },
   {
+    id: 'deepseek',
     name: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
     defaultModel: 'deepseek-chat',
   },
   {
+    id: 'moonshot',
     name: 'Moonshot',
     baseUrl: 'https://api.moonshot.cn/v1',
     defaultModel: 'moonshot-v1-8k',
   },
   {
+    id: 'ollama',
     name: 'Ollama 本地',
     baseUrl: 'http://localhost:11434/v1',
     defaultModel: 'llama3.2',
