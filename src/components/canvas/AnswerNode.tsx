@@ -121,7 +121,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
             }}
             className="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:enabled:bg-secondary hover:enabled:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <RefreshCw className={cn('h-3 w-3', isRetryDisabled && 'animate-spin')} />
+            <RefreshCw className={cn('h-3 w-3', isStreaming && 'animate-spin')} />
           </button>
         </div>
       </div>
