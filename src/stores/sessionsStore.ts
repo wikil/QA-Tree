@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db, KV_KEYS } from '@/lib/db';
+import { clearNodePositions, db, KV_KEYS } from '@/lib/db';
 import { newId } from '@/lib/ids';
 import { generateSessionTitle } from '@/lib/sessionTitle';
 import { discardStreamsForSession } from '@/stores/treeStore';
@@ -164,6 +164,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       await db.edges.where('sessionId').equals(id).delete();
       await db.sessions.delete(id);
       await clearCollapsedForSession(id);
+      await clearNodePositions(id);
     });
     set((s) => ({ sessions: s.sessions.filter((x) => x.id !== id) }));
     if (get().currentSessionId === id) {

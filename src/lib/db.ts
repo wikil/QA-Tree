@@ -52,4 +52,58 @@ export const KV_KEYS = {
   locale: 'settings.locale',
   collapsedSubtrees: 'settings.collapsedSubtrees',
   currentSessionId: 'app.currentSessionId',
+  nodePositionsPrefix: 'positions:',
+  legacyNodePositions: 'canvas.nodePositions',
 } as const;
+
+export type NodePosition = { x: number; y: number };
+type SessionPositionMap = Record<string, NodePosition>;
+type AllPositionsMap = Record<string, SessionPositionMap>;
+
+function nodePositionsKey(sessionId: string): string {
+  return `${KV_KEYS.nodePositionsPrefix}${sessionId}`;
+}
+
+async function readLegacyPositions(): Promise<AllPositionsMap> {
+  const rec = await db.kv.get(KV_KEYS.legacyNodePositions);
+  return (rec?.value as AllPositionsMap | undefined) ?? {};
+}
+
+async function removeLegacyPositions(sessionId: string): Promise<void> {
+  const all = await readLegacyPositions();
+  if (!(sessionId in all)) return;
+  delete all[sessionId];
+  if (Object.keys(all).length === 0) {
+    await db.kv.delete(KV_KEYS.legacyNodePositions);
+  } else {
+    await db.kv.put({ key: KV_KEYS.legacyNodePositions, value: all });
+  }
+}
+
+export async function getNodePositions(
+  sessionId: string,
+): Promise<SessionPositionMap> {
+  const rec = await db.kv.get(nodePositionsKey(sessionId));
+  if (rec) return (rec.value as SessionPositionMap | undefined) ?? {};
+
+  // Backward compatibility for local data written by the first P2 draft, which
+  // stored all sessions under one global KV record.
+  const legacy = await readLegacyPositions();
+  return legacy[sessionId] ?? {};
+}
+
+export async function setNodePositions(
+  sessionId: string,
+  positions: SessionPositionMap,
+): Promise<void> {
+  if (Object.keys(positions).length === 0) {
+    await db.kv.delete(nodePositionsKey(sessionId));
+  } else {
+    await db.kv.put({ key: nodePositionsKey(sessionId), value: positions });
+  }
+  await removeLegacyPositions(sessionId);
+}
+
+export async function clearNodePositions(sessionId: string): Promise<void> {
+  await setNodePositions(sessionId, {});
+}

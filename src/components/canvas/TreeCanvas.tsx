@@ -11,6 +11,7 @@ import {
   type Node,
   type NodeMouseHandler,
   type EdgeMouseHandler,
+  type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -59,12 +60,17 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
   const selectedEdgeId = useTreeStore((s) => s.selectedEdgeId);
   const collapsedNodeIds = useTreeStore((s) => s.collapsedNodeIds);
   const streamingNodeIds = useTreeStore((s) => s.streamingNodeIds);
+  const positions = useTreeStore((s) => s.positions);
+  const layoutVersion = useTreeStore((s) => s.layoutVersion);
+  const loadedSessionId = useTreeStore((s) => s.loadedSessionId);
   const selectNode = useTreeStore((s) => s.selectNode);
   const selectEdge = useTreeStore((s) => s.selectEdge);
   const toggleCollapse = useTreeStore((s) => s.toggleCollapse);
   const expandAll = useTreeStore((s) => s.expandAll);
   const collapseAll = useTreeStore((s) => s.collapseAll);
   const retryNode = useTreeStore((s) => s.retryNode);
+  const setNodePosition = useTreeStore((s) => s.setNodePosition);
+  const clearAllPositions = useTreeStore((s) => s.clearAllPositions);
 
   const requestDeleteSubtree = useTreeStore((s) => s.requestDeleteSubtree);
 
@@ -104,9 +110,12 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
     return m;
   }, [childrenByParent, rootNodeId]);
 
-  // Layout depends only on structure (size + edges + collapsed + root). Streaming
-  // content updates change `nodesMap` reference but not size, so dagre is skipped
-  // during streaming — the canvas would otherwise re-layout 10-50 times/sec.
+  // Layout depends only on structure. `layoutVersion` is bumped by every
+  // structural mutation in the store (add/remove/collapse/position/fork) but
+  // never by SSE deltas, so dagre is skipped during streaming. We pair it with
+  // `loadedSessionId` because `loadSession` resets layoutVersion to 0 — without
+  // the session id in deps, switching to a fresh session at version 0 would
+  // reuse the previous session's memoized layout.
   const layout = useMemo(
     () =>
       layoutTree({
@@ -114,9 +123,10 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         edges: edgesMap,
         collapsedNodeIds,
         rootNodeId,
+        positions,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nodesMap.size, edgesMap, collapsedNodeIds, rootNodeId],
+    [loadedSessionId, layoutVersion, rootNodeId],
   );
 
   // pathHighlight only walks via edge chain; dropping `nodesMap` from deps
@@ -170,6 +180,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
       const node: QANode | undefined = nodesMap.get(pn.id);
       if (!node) continue;
       const childCount = (childrenByParent.get(pn.id) ?? []).length;
+      const isPinned = positions[pn.id] != null;
       const data: AnswerNodeData = {
         node,
         childCount,
@@ -179,6 +190,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         isSelected: selectedNodeId === pn.id,
         isRetryDisabled: streamingNodeIds.has(pn.id) || childCount > 0,
         isDeleteDisabled: streamingNodeIds.has(pn.id),
+        isPinned,
         onToggleCollapse: toggleCollapse,
         onAddBranch: handleAddBranch,
         onRetry: handleRetry,
@@ -190,7 +202,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         type: 'answer',
         position: { x: pn.x, y: pn.y },
         data: data as unknown as Record<string, unknown>,
-        draggable: false,
+        draggable: true,
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
       });
@@ -203,6 +215,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
     descendantCount,
     collapsedNodeIds,
     streamingNodeIds,
+    positions,
     highlight.nodeIds,
     selectedNodeId,
     toggleCollapse,
@@ -261,6 +274,14 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
     selectNode(null);
   }, [selectNode]);
 
+  const onNodeDragStop: OnNodeDrag = useCallback(
+    (_, node) => {
+      if (node.id === START_NODE_ID) return;
+      setNodePosition(node.id, { x: node.position.x, y: node.position.y });
+    },
+    [setNodePosition],
+  );
+
   const handleFit = useCallback(() => {
     void fitView({ padding: 0.18, duration: 480 });
   }, [fitView]);
@@ -274,6 +295,10 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
       duration: 480,
     });
   }, [selectNode, expandAll, layout.startPos.x, layout.startPos.y, setCenter]);
+
+  const handleResetLayout = useCallback(() => {
+    void clearAllPositions();
+  }, [clearAllPositions]);
 
   // Compact path label for the toolbar — 'root › Q1 › Q2 › Q3'.
   // Walks via edge chain only; nodesMap content never affects the result.
@@ -290,6 +315,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
 
   const visibleAnswerCount = layout.nodes.length;
   const collapsedCount = collapsedNodeIds.size;
+  const pinnedCount = Object.keys(positions).length;
 
   return (
     <div className="flex h-full w-full flex-col bg-background">
@@ -298,8 +324,10 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         pathLabel={pathLabel}
         nodeCount={visibleAnswerCount}
         collapsedCount={collapsedCount}
+        pinnedCount={pinnedCount}
         onFit={handleFit}
         onReset={handleReset}
+        onResetLayout={handleResetLayout}
         onCollapseAll={() => void collapseAll()}
         onExpandAll={() => void expandAll()}
       />
@@ -315,7 +343,8 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
             onNodeClick={onNodeClick}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
-            nodesDraggable={false}
+            onNodeDragStop={onNodeDragStop}
+            nodesDraggable
             nodesConnectable={false}
             elementsSelectable
             proOptions={{ hideAttribution: false }}

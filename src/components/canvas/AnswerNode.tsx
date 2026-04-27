@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Pin,
   Plus,
   RefreshCw,
   Trash2,
@@ -22,6 +23,7 @@ export interface AnswerNodeData {
   isSelected: boolean;
   isRetryDisabled: boolean;
   isDeleteDisabled: boolean;
+  isPinned: boolean;
   onToggleCollapse?: (id: string) => void;
   onAddBranch?: (id: string) => void;
   onRetry?: (id: string) => void;
@@ -50,6 +52,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
     isSelected,
     isRetryDisabled,
     isDeleteDisabled,
+    isPinned,
     onToggleCollapse,
     onAddBranch,
     onRetry,
@@ -111,6 +114,15 @@ function AnswerNodeComponent({ data }: NodeProps) {
                 {tokens}
               </span>
             </>
+          )}
+          {isPinned && (
+            <span
+              title={t.answer.pinnedHint}
+              aria-label={t.answer.pinnedAria}
+              className="inline-flex translate-y-[1px] items-center text-accent/85"
+            >
+              <Pin className="h-3 w-3 -rotate-12 fill-current" />
+            </span>
           )}
         </div>
         <div className="flex items-center gap-0.5 opacity-60 transition-opacity group-hover/node:opacity-100">
@@ -276,6 +288,7 @@ function answerNodePropsEqual(
   if (a.isSelected !== b.isSelected) return false;
   if (a.isRetryDisabled !== b.isRetryDisabled) return false;
   if (a.isDeleteDisabled !== b.isDeleteDisabled) return false;
+  if (a.isPinned !== b.isPinned) return false;
   // Callbacks come from useCallback in TreeCanvas — referentially stable, skip.
   return true;
 }

@@ -68,8 +68,14 @@ export function layoutTree(args: {
   edges: ReadonlyMap<string, QAEdge>;
   collapsedNodeIds: ReadonlySet<string>;
   rootNodeId: string;
+  /**
+   * Manually-pinned positions (top-left). Pinned nodes are still passed through
+   * dagre so unpinned siblings/children get reasonable auto-layout, then the
+   * stored values overwrite dagre's output for pinned ids only.
+   */
+  positions?: Readonly<Record<string, { x: number; y: number }>>;
 }): LayoutResult {
-  const { nodes, edges, collapsedNodeIds, rootNodeId } = args;
+  const { nodes, edges, collapsedNodeIds, rootNodeId, positions } = args;
   const hidden = computeHiddenSet(edges, collapsedNodeIds);
 
   const g = new dagre.graphlib.Graph({ multigraph: false });
@@ -123,11 +129,16 @@ export function layoutTree(args: {
     const v = g.node(id);
     if (!v) continue;
     // dagre returns center coords — convert to top-left for React Flow
-    const x = v.x - v.width / 2;
-    const y = v.y - v.height / 2;
+    let x = v.x - v.width / 2;
+    let y = v.y - v.height / 2;
     if (id === START_ID) {
       startPos = { x, y };
     } else {
+      const pinned = positions?.[id];
+      if (pinned) {
+        x = pinned.x;
+        y = pinned.y;
+      }
       positionedNodes.push({ id, x, y, width: v.width, height: v.height });
     }
     minX = Math.min(minX, x);

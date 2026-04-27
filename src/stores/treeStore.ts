@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import { db, KV_KEYS } from '@/lib/db';
+import {
+  db,
+  getNodePositions,
+  KV_KEYS,
+  setNodePositions,
+  type NodePosition,
+} from '@/lib/db';
 import { newId } from '@/lib/ids';
 import { buildMessages } from '@/lib/context';
 import { LLMError, streamChat } from '@/lib/llm';
@@ -46,6 +52,15 @@ interface TreeState {
   streamingNodeIds: Set<string>;
   /** Node id whose subtree is being confirmed for deletion. Null = no dialog. */
   deleteTargetId: string | null;
+  /** Manually-pinned node positions for the loaded session. */
+  positions: Record<string, NodePosition>;
+  /**
+   * Monotonic counter bumped on every structural change (add/remove/collapse/
+   * fork/position). SSE deltas do NOT bump this — it is the layout memo's only
+   * trigger. Resets to 0 on session switch (paired with `loadedSessionId` in
+   * memo deps so a new session starting at 0 still recomputes).
+   */
+  layoutVersion: number;
 
   loadSession: (sessionId: string | null) => Promise<void>;
   selectNode: (id: string | null) => void;
@@ -60,6 +75,8 @@ interface TreeState {
   abortSessionStreams: (sessionId: string) => void;
   requestDeleteSubtree: (nodeId: string | null) => void;
   deleteNodeSubtree: (nodeId: string) => Promise<void>;
+  setNodePosition: (nodeId: string, position: NodePosition) => void;
+  clearAllPositions: () => Promise<void>;
 }
 
 interface StreamRecord {
@@ -374,6 +391,8 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   activeStreamSessionId: null,
   streamingNodeIds: new Set(),
   deleteTargetId: null,
+  positions: {},
+  layoutVersion: 0,
 
   loadSession: async (sessionId) => {
     // Idempotent: same session already loaded -> no-op (callers can fire-and-forget).
@@ -390,14 +409,17 @@ export const useTreeStore = create<TreeState>((set, get) => ({
         streamingNodeIds: new Set(),
         activeStreamSessionId: getActiveStreamSessionId(),
         deleteTargetId: null,
+        positions: {},
+        layoutVersion: 0,
       });
       return;
     }
 
-    const [storedNodes, edges, collapsed] = await Promise.all([
+    const [storedNodes, edges, collapsed, positions] = await Promise.all([
       db.nodes.where('sessionId').equals(sessionId).toArray(),
       db.edges.where('sessionId').equals(sessionId).toArray(),
       readCollapsed(sessionId),
+      getNodePositions(sessionId),
     ]);
 
     const staleStreamingNodes: QANode[] = [];
@@ -425,6 +447,8 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       streamingNodeIds: getStreamingNodeIdsForSession(sessionId),
       activeStreamSessionId: getActiveStreamSessionId(),
       deleteTargetId: null,
+      positions,
+      layoutVersion: 0,
     });
   },
 
@@ -437,14 +461,18 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     const next = new Set(get().collapsedNodeIds);
     if (next.has(nodeId)) next.delete(nodeId);
     else next.add(nodeId);
-    set({ collapsedNodeIds: next });
+    set((s) => ({ collapsedNodeIds: next, layoutVersion: s.layoutVersion + 1 }));
     await writeCollapsed(sessionId, next);
   },
 
   expandAll: async () => {
     const sessionId = get().loadedSessionId;
     if (!sessionId) return;
-    set({ collapsedNodeIds: new Set() });
+    if (get().collapsedNodeIds.size === 0) return;
+    set((s) => ({
+      collapsedNodeIds: new Set(),
+      layoutVersion: s.layoutVersion + 1,
+    }));
     await writeCollapsed(sessionId, new Set());
   },
 
@@ -460,7 +488,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     for (const n of nodes.values()) {
       if (n.role === 'assistant' && hasChildren.has(n.id)) next.add(n.id);
     }
-    set({ collapsedNodeIds: next });
+    set((s) => ({ collapsedNodeIds: next, layoutVersion: s.layoutVersion + 1 }));
     await writeCollapsed(sessionId, next);
   },
 
@@ -507,7 +535,13 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       const edges = new Map(s.edges);
       nodes.set(nodeId, node);
       edges.set(edgeId, edge);
-      return { nodes, edges, selectedNodeId: nodeId, selectedEdgeId: null };
+      return {
+        nodes,
+        edges,
+        selectedNodeId: nodeId,
+        selectedEdgeId: null,
+        layoutVersion: s.layoutVersion + 1,
+      };
     });
 
     if (parent.role === 'root') {
@@ -612,6 +646,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     // Track whether any deleted node was actually collapsed; skips the IDB
     // round-trip for the common case (delete a leaf with no folded children).
     let collapsedDirty = false;
+    let positionsDirty = false;
 
     set((s) => {
       if (s.loadedSessionId !== sessionId) return s;
@@ -623,6 +658,13 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       for (const id of nodeIds) {
         if (nextCollapsed.delete(id)) collapsedDirty = true;
       }
+      const nextPositions = { ...s.positions };
+      for (const id of nodeIds) {
+        if (id in nextPositions) {
+          delete nextPositions[id];
+          positionsDirty = true;
+        }
+      }
       const selectedNodeId =
         s.selectedNodeId && nodeIds.has(s.selectedNodeId) ? parentNodeId : s.selectedNodeId;
       const selectedEdgeId =
@@ -632,9 +674,11 @@ export const useTreeStore = create<TreeState>((set, get) => ({
         nodes: nextNodes,
         edges: nextEdges,
         collapsedNodeIds: nextCollapsed,
+        positions: nextPositions,
         selectedNodeId,
         selectedEdgeId,
         deleteTargetId,
+        layoutVersion: s.layoutVersion + 1,
       };
     });
 
@@ -644,8 +688,42 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       await writeCollapsed(sessionId, persisted);
     }
 
+    if (positionsDirty) {
+      // Flush immediately — the just-deleted nodes must not linger in the
+      // persisted KV record.
+      await setNodePositions(sessionId, get().positions);
+    }
+
     void useSessionsStore.getState().touchSession(sessionId);
     syncStreamingState();
+  },
+
+  setNodePosition: (nodeId, position) => {
+    const sessionId = get().loadedSessionId;
+    if (!sessionId) return;
+    let nextPositions: Record<string, NodePosition> | null = null;
+    set((s) => {
+      const node = s.nodes.get(nodeId);
+      if (!node || node.role === 'root') return s;
+      const cur = s.positions[nodeId];
+      if (cur && cur.x === position.x && cur.y === position.y) return s;
+      nextPositions = { ...s.positions, [nodeId]: position };
+      return {
+        positions: nextPositions,
+        layoutVersion: s.layoutVersion + 1,
+      };
+    });
+    if (nextPositions) {
+      void setNodePositions(sessionId, nextPositions);
+    }
+  },
+
+  clearAllPositions: async () => {
+    const sessionId = get().loadedSessionId;
+    if (!sessionId) return;
+    if (Object.keys(get().positions).length === 0) return;
+    set((s) => ({ positions: {}, layoutVersion: s.layoutVersion + 1 }));
+    await setNodePositions(sessionId, {});
   },
 }));
 
