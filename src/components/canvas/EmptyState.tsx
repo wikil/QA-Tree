@@ -15,10 +15,13 @@ export function EmptyState() {
   const [value, setValue] = useState('');
   const { session, provider, proxy } = useResolvedProvider();
   const sendPrompt = useTreeStore((s) => s.sendPrompt);
+  const activeStreamSessionId = useTreeStore((s) => s.activeStreamSessionId);
 
   const noSession = !session;
   const noProvider = !provider;
-  const disabled = noSession || noProvider;
+  const blockedByOtherSession =
+    activeStreamSessionId !== null && activeStreamSessionId !== session?.id;
+  const disabled = noSession || noProvider || blockedByOtherSession;
 
   const submit = async () => {
     const trimmed = value.trim();
@@ -109,6 +112,8 @@ export function EmptyState() {
                 ? '请先创建一个 session…'
                 : noProvider
                 ? '请先配置 LLM provider…'
+                : blockedByOtherSession
+                ? '另一个 session 正在生成，当前暂不能提问…'
                 : '在这里写下你想深入探索的问题…'
             }
             rows={3}

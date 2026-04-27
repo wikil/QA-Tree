@@ -167,7 +167,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         isCollapsed: collapsedNodeIds.has(pn.id),
         isOnPath: highlight.nodeIds.has(pn.id),
         isSelected: selectedNodeId === pn.id,
-        isRetryDisabled: streamingNodeIds.has(pn.id),
+        isRetryDisabled: streamingNodeIds.has(pn.id) || childCount > 0,
         onToggleCollapse: toggleCollapse,
         onAddBranch: handleAddBranch,
         onRetry: handleRetry,

@@ -34,7 +34,9 @@ interface TreeState {
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
   collapsedNodeIds: Set<string>;
-  /** Set during runStream; cleared on done/abort/error. Single source of truth for "is anything streaming right now". */
+  /** Active streaming session. Same session may have multiple concurrent streams. */
+  activeStreamSessionId: string | null;
+  /** Streaming nodes for the currently loaded session only. */
   streamingNodeIds: Set<string>;
 
   loadSession: (sessionId: string | null) => Promise<void>;
@@ -47,34 +49,124 @@ interface TreeState {
   sendPrompt: (args: SendPromptArgs) => Promise<void>;
   retryNode: (nodeId: string, args: RetryArgs) => Promise<void>;
   abortStream: (nodeId: string) => void;
+  abortSessionStreams: (sessionId: string) => void;
 }
 
-// 模块级流式控制器与节流计时器：与 store 解耦，避免 set() 反复创建新引用
-const streamControllers = new Map<string, AbortController>();
+interface StreamRecord {
+  runId: string;
+  sessionId: string;
+  nodeId: string;
+  controller: AbortController;
+  node: QANode;
+  deleted: boolean;
+}
+
+// Module-level stream records keep in-flight requests alive while the user views
+// another session. Deltas always persist through IndexedDB and only mirror into
+// the Zustand store when their session is currently loaded.
+const streamRecords = new Map<string, StreamRecord>();
 const flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function snapshotNode(state: TreeState, id: string): QANode | undefined {
   return state.nodes.get(id);
 }
 
-async function flushNode(id: string): Promise<void> {
-  const timer = flushTimers.get(id);
-  if (timer) {
-    clearTimeout(timer);
-    flushTimers.delete(id);
+function getActiveStreamSessionId(): string | null {
+  for (const rec of streamRecords.values()) {
+    if (!rec.deleted) return rec.sessionId;
   }
-  const node = useTreeStore.getState().nodes.get(id);
-  if (node) await db.nodes.put(node);
+  return null;
 }
 
-function scheduleFlush(id: string) {
-  if (flushTimers.has(id)) return; // 已在等待，沿用已有定时器（leading throttle）
+function getStreamingNodeIdsForSession(sessionId: string | null): Set<string> {
+  if (!sessionId) return new Set();
+  const ids = new Set<string>();
+  for (const rec of streamRecords.values()) {
+    if (!rec.deleted && rec.sessionId === sessionId) ids.add(rec.nodeId);
+  }
+  return ids;
+}
+
+function syncStreamingState() {
+  const state = useTreeStore.getState();
+  useTreeStore.setState({
+    activeStreamSessionId: getActiveStreamSessionId(),
+    streamingNodeIds: getStreamingNodeIdsForSession(state.loadedSessionId),
+  });
+}
+
+function isCurrentRecord(rec: StreamRecord): boolean {
+  const cur = streamRecords.get(rec.nodeId);
+  return cur?.runId === rec.runId && !cur.deleted;
+}
+
+function clearFlushTimer(nodeId: string) {
+  const timer = flushTimers.get(nodeId);
+  if (timer) {
+    clearTimeout(timer);
+    flushTimers.delete(nodeId);
+  }
+}
+
+function putLoadedNode(sessionId: string, node: QANode) {
+  useTreeStore.setState((s) => {
+    if (s.loadedSessionId !== sessionId) return s;
+    const cur = s.nodes.get(node.id);
+    if (!cur) return s;
+    const nodes = new Map(s.nodes);
+    nodes.set(node.id, node);
+    return { nodes };
+  });
+}
+
+function applyRecordPatch(rec: StreamRecord, patch: Partial<QANode>) {
+  if (!isCurrentRecord(rec)) return;
+  rec.node = { ...rec.node, ...patch };
+  putLoadedNode(rec.sessionId, rec.node);
+}
+
+async function flushRecord(rec: StreamRecord): Promise<void> {
+  clearFlushTimer(rec.nodeId);
+  if (isCurrentRecord(rec)) await db.nodes.put(rec.node);
+}
+
+function scheduleFlush(rec: StreamRecord) {
+  if (flushTimers.has(rec.nodeId)) return; // leading throttle
+  const runId = rec.runId;
+  const nodeId = rec.nodeId;
   const t = setTimeout(() => {
-    flushTimers.delete(id);
-    const node = useTreeStore.getState().nodes.get(id);
-    if (node) void db.nodes.put(node);
+    flushTimers.delete(nodeId);
+    const cur = streamRecords.get(nodeId);
+    if (cur?.runId === runId && !cur.deleted) void db.nodes.put(cur.node);
   }, FLUSH_DELAY_MS);
-  flushTimers.set(id, t);
+  flushTimers.set(nodeId, t);
+}
+
+function abortRecord(rec: StreamRecord) {
+  if (!rec.controller.signal.aborted) rec.controller.abort();
+}
+
+function discardRecord(nodeId: string) {
+  const rec = streamRecords.get(nodeId);
+  if (!rec) return;
+  rec.deleted = true;
+  abortRecord(rec);
+  streamRecords.delete(nodeId);
+  clearFlushTimer(nodeId);
+}
+
+export function discardStreamsForSession(sessionId: string) {
+  for (const rec of Array.from(streamRecords.values())) {
+    if (rec.sessionId === sessionId) discardRecord(rec.nodeId);
+  }
+  syncStreamingState();
+}
+
+function hasChild(edges: ReadonlyMap<string, QAEdge>, nodeId: string): boolean {
+  for (const edge of edges.values()) {
+    if (edge.fromNodeId === nodeId) return true;
+  }
+  return false;
 }
 
 async function readCollapsed(sessionId: string): Promise<Set<string>> {
@@ -94,42 +186,46 @@ async function writeCollapsed(sessionId: string, ids: Set<string>): Promise<void
   await db.kv.put({ key: KV_KEYS.collapsedSubtrees, value: map });
 }
 
-function updateNode(id: string, patch: Partial<QANode>) {
+function setLoadedNode(node: QANode) {
   useTreeStore.setState((s) => {
-    const cur = s.nodes.get(id);
+    if (s.loadedSessionId !== node.sessionId) return s;
+    const cur = s.nodes.get(node.id);
     if (!cur) return s;
-    const next = new Map(s.nodes);
-    next.set(id, { ...cur, ...patch });
-    return { nodes: next };
+    const nodes = new Map(s.nodes);
+    nodes.set(node.id, node);
+    return { nodes };
   });
 }
 
-function abortAndCleanup(nodeId: string) {
-  const ctl = streamControllers.get(nodeId);
-  if (ctl && !ctl.signal.aborted) ctl.abort();
-  streamControllers.delete(nodeId);
-}
-
-function markStreaming(nodeId: string, on: boolean) {
-  useTreeStore.setState((s) => {
-    const next = new Set(s.streamingNodeIds);
-    if (on) next.add(nodeId);
-    else next.delete(nodeId);
-    return { streamingNodeIds: next };
-  });
+function assertCanStartStream(sessionId: string) {
+  const activeSessionId = getActiveStreamSessionId();
+  if (activeSessionId && activeSessionId !== sessionId) {
+    throw new Error('另一个 session 正在生成，当前 session 暂不能发起新请求');
+  }
 }
 
 async function runStream(args: {
+  sessionId: string;
   nodeId: string;
   parentNodeId: string;
   promptForContext: string;
+  initialNode: QANode;
   provider: ProviderConfig;
   proxy: ProxyConfig;
 }) {
-  const { nodeId, parentNodeId, promptForContext, provider, proxy } = args;
-  const ctl = new AbortController();
-  streamControllers.set(nodeId, ctl);
-  markStreaming(nodeId, true);
+  const { sessionId, nodeId, parentNodeId, promptForContext, initialNode, provider, proxy } = args;
+  if (streamRecords.has(nodeId)) return;
+
+  const rec: StreamRecord = {
+    runId: newId(),
+    sessionId,
+    nodeId,
+    controller: new AbortController(),
+    node: initialNode,
+    deleted: false,
+  };
+  streamRecords.set(nodeId, rec);
+  syncStreamingState();
 
   try {
     const state = useTreeStore.getState();
@@ -143,7 +239,7 @@ async function runStream(args: {
         provider,
       });
     } catch (e) {
-      updateNode(nodeId, {
+      applyRecordPatch(rec, {
         status: 'error',
         finishReason: 'error',
         errorMessage: `构造上下文失败：${(e as Error).message}`,
@@ -155,23 +251,24 @@ async function runStream(args: {
       provider,
       proxy,
       messages,
-      signal: ctl.signal,
+      signal: rec.controller.signal,
       onDelta: (_, full) => {
-        updateNode(nodeId, { content: full });
-        scheduleFlush(nodeId);
+        if (!isCurrentRecord(rec)) return;
+        applyRecordPatch(rec, { content: full });
+        scheduleFlush(rec);
       },
     });
 
     let status: NodeStatus;
     let finishReason: FinishReason;
-    if (ctl.signal.aborted || result.finishReason === 'abort') {
+    if (rec.controller.signal.aborted || result.finishReason === 'abort') {
       status = 'aborted';
       finishReason = 'abort';
     } else {
       status = 'done';
       finishReason = result.finishReason;
     }
-    updateNode(nodeId, {
+    applyRecordPatch(rec, {
       content: result.content,
       status,
       finishReason,
@@ -180,21 +277,23 @@ async function runStream(args: {
       errorMessage: undefined,
     });
   } catch (e) {
-    if (ctl.signal.aborted) {
-      updateNode(nodeId, { status: 'aborted', finishReason: 'abort' });
+    if (rec.controller.signal.aborted) {
+      applyRecordPatch(rec, { status: 'aborted', finishReason: 'abort' });
     } else {
       const msg =
         e instanceof LLMError ? e.message : `请求失败：${(e as Error).message}`;
-      updateNode(nodeId, {
+      applyRecordPatch(rec, {
         status: 'error',
         finishReason: 'error',
         errorMessage: msg,
       });
     }
   } finally {
-    streamControllers.delete(nodeId);
-    markStreaming(nodeId, false);
-    await flushNode(nodeId);
+    if (isCurrentRecord(rec)) {
+      await flushRecord(rec);
+      streamRecords.delete(nodeId);
+      syncStreamingState();
+    }
   }
 }
 
@@ -205,14 +304,12 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   selectedNodeId: null,
   selectedEdgeId: null,
   collapsedNodeIds: new Set(),
+  activeStreamSessionId: null,
   streamingNodeIds: new Set(),
 
   loadSession: async (sessionId) => {
-    // Idempotent: same session already loaded → no-op (callers can fire-and-forget).
+    // Idempotent: same session already loaded -> no-op (callers can fire-and-forget).
     if (get().loadedSessionId === sessionId) return;
-
-    for (const id of streamControllers.keys()) abortAndCleanup(id);
-    for (const id of flushTimers.keys()) await flushNode(id);
 
     if (!sessionId) {
       set({
@@ -223,15 +320,32 @@ export const useTreeStore = create<TreeState>((set, get) => ({
         selectedEdgeId: null,
         collapsedNodeIds: new Set(),
         streamingNodeIds: new Set(),
+        activeStreamSessionId: getActiveStreamSessionId(),
       });
       return;
     }
 
-    const [nodes, edges, collapsed] = await Promise.all([
+    const [storedNodes, edges, collapsed] = await Promise.all([
       db.nodes.where('sessionId').equals(sessionId).toArray(),
       db.edges.where('sessionId').equals(sessionId).toArray(),
       readCollapsed(sessionId),
     ]);
+
+    const staleStreamingNodes: QANode[] = [];
+    const nodes = storedNodes.map((node) => {
+      const active = streamRecords.get(node.id);
+      if (active && active.sessionId === sessionId && !active.deleted) return active.node;
+      if (node.status === 'streaming') {
+        const aborted: QANode = { ...node, status: 'aborted', finishReason: 'abort' };
+        staleStreamingNodes.push(aborted);
+        return aborted;
+      }
+      return node;
+    });
+    if (staleStreamingNodes.length > 0) {
+      await db.nodes.bulkPut(staleStreamingNodes);
+    }
+
     set({
       loadedSessionId: sessionId,
       nodes: new Map(nodes.map((n) => [n.id, n])),
@@ -239,7 +353,8 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       selectedNodeId: null,
       selectedEdgeId: null,
       collapsedNodeIds: collapsed,
-      streamingNodeIds: new Set(),
+      streamingNodeIds: getStreamingNodeIdsForSession(sessionId),
+      activeStreamSessionId: getActiveStreamSessionId(),
     });
   },
 
@@ -282,8 +397,12 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   sendPrompt: async ({ parentNodeId, prompt, provider, proxy }) => {
     const sessionId = get().loadedSessionId;
     if (!sessionId) throw new Error('没有载入的 session');
+    assertCanStartStream(sessionId);
     const parent = snapshotNode(get(), parentNodeId);
     if (!parent) throw new Error(`父节点不存在：${parentNodeId}`);
+    if (parent.status === 'streaming') {
+      throw new Error('当前节点仍在生成，完成或中止后才能基于它继续提问');
+    }
 
     const now = Date.now();
     const edgeId = newId();
@@ -321,13 +440,18 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       return { nodes, edges, selectedNodeId: nodeId, selectedEdgeId: null };
     });
 
-    // 同步 touch session 的 updatedAt
-    void useSessionsStore.getState().touchSession(sessionId);
+    if (parent.role === 'root') {
+      void useSessionsStore.getState().recordFirstPrompt(sessionId, prompt);
+    } else {
+      void useSessionsStore.getState().touchSession(sessionId);
+    }
 
-    await runStream({
+    void runStream({
+      sessionId,
       nodeId,
       parentNodeId,
       promptForContext: prompt,
+      initialNode: node,
       provider,
       proxy,
     });
@@ -336,41 +460,48 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   retryNode: async (nodeId, { provider, proxy }) => {
     const sessionId = get().loadedSessionId;
     if (!sessionId) throw new Error('没有载入的 session');
+    assertCanStartStream(sessionId);
     const node = snapshotNode(get(), nodeId);
     if (!node) throw new Error(`节点不存在：${nodeId}`);
     if (!node.parentEdgeId) throw new Error('root 节点不可重试');
+    if (hasChild(get().edges, nodeId)) return;
     const edge = get().edges.get(node.parentEdgeId);
     if (!edge) throw new Error('入边缺失');
+    if (streamRecords.has(nodeId)) return;
 
-    const existingCtl = streamControllers.get(nodeId);
-    if (get().streamingNodeIds.has(nodeId) || (existingCtl && !existingCtl.signal.aborted)) {
-      return;
-    }
-
-    abortAndCleanup(nodeId);
-
-    updateNode(nodeId, {
+    const nextNode: QANode = {
+      ...node,
       content: '',
       status: 'streaming',
       finishReason: undefined,
       errorMessage: undefined,
       model: provider.defaultModel,
       tokenUsage: undefined,
-    });
-    await flushNode(nodeId);
+    };
+    await db.nodes.put(nextNode);
+    setLoadedNode(nextNode);
     void useSessionsStore.getState().touchSession(sessionId);
 
-    await runStream({
+    void runStream({
+      sessionId,
       nodeId,
       parentNodeId: edge.fromNodeId,
       promptForContext: edge.prompt,
+      initialNode: nextNode,
       provider,
       proxy,
     });
   },
 
   abortStream: (nodeId) => {
-    abortAndCleanup(nodeId);
+    const rec = streamRecords.get(nodeId);
+    if (rec) abortRecord(rec);
+  },
+
+  abortSessionStreams: (sessionId) => {
+    for (const rec of streamRecords.values()) {
+      if (rec.sessionId === sessionId) abortRecord(rec);
+    }
   },
 }));
 

@@ -4,6 +4,7 @@ export type FinishReason = 'stop' | 'length' | 'abort' | 'error';
 export interface Session {
   id: string;
   title: string;
+  firstPrompt?: string;
   createdAt: number;
   updatedAt: number;
   rootNodeId: string;

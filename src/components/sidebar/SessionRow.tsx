@@ -22,6 +22,7 @@ import type { Session } from '@/types';
 interface SessionRowProps {
   session: Session;
   isCurrent: boolean;
+  isStreaming: boolean;
   nodeCount?: number;
   onSelect: () => void;
 }
@@ -29,6 +30,7 @@ interface SessionRowProps {
 export function SessionRow({
   session,
   isCurrent,
+  isStreaming,
   nodeCount,
   onSelect,
 }: SessionRowProps) {
@@ -77,6 +79,12 @@ export function SessionRow({
       {nodeCount !== undefined && (
         <>
           <span>{Math.max(0, nodeCount - 1)} nodes</span>
+          <span className="text-muted-foreground/40">·</span>
+        </>
+      )}
+      {isStreaming && (
+        <>
+          <span className="text-accent">streaming</span>
           <span className="text-muted-foreground/40">·</span>
         </>
       )}

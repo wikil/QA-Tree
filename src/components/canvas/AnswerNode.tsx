@@ -110,7 +110,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
           <button
             type="button"
             aria-label="重新生成"
-            title={isRetryDisabled ? '生成中不可重新生成' : '重新生成'}
+            title={isRetryDisabled ? '当前不可重新生成' : '重新生成'}
             disabled={isRetryDisabled}
             onClick={(e) => {
               e.stopPropagation();

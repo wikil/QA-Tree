@@ -26,6 +26,7 @@ export default function App() {
 
   const loadSession = useTreeStore((s) => s.loadSession);
   const treeNodeCount = useTreeStore((s) => s.nodes.size);
+  const activeStreamSessionId = useTreeStore((s) => s.activeStreamSessionId);
 
   const [search, setSearch] = useState('');
 
@@ -86,7 +87,9 @@ export default function App() {
   const filteredSessions = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return sessions;
-    return sessions.filter((s) => s.title.toLowerCase().includes(q));
+    return sessions.filter((s) =>
+      `${s.title} ${s.firstPrompt ?? ''}`.toLowerCase().includes(q),
+    );
   }, [sessions, search]);
 
   return (
@@ -177,6 +180,7 @@ export default function App() {
                   key={s.id}
                   session={s}
                   isCurrent={isCurrent}
+                  isStreaming={s.id === activeStreamSessionId}
                   nodeCount={isCurrent ? treeNodeCount : undefined}
                   onSelect={() => void setCurrentSessionId(s.id)}
                 />

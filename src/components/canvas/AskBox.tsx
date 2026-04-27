@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowUpRight, CornerDownLeft, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTreeStore } from '@/stores/treeStore';
+import { useSessionsStore } from '@/stores/sessionsStore';
 import { useResolvedProvider } from '@/hooks/useResolvedProvider';
 import { walkPathToRoot } from '@/lib/context';
 import { summarizeText } from '@/lib/format';
@@ -20,11 +21,13 @@ interface BannerKind {
 function placeholderFor(opts: {
   noSession: boolean;
   noProvider: boolean;
-  streaming: boolean;
+  blockedByOtherSession: boolean;
+  parentStreaming: boolean;
 }): string {
   if (opts.noSession) return '请先创建或选择一个 session…';
   if (opts.noProvider) return '请先在设置中配置 LLM provider…';
-  if (opts.streaming) return '生成中，等当前回答完成…';
+  if (opts.blockedByOtherSession) return '另一个 session 正在生成，当前暂不能提问…';
+  if (opts.parentStreaming) return '当前节点仍在生成，完成或中止后再继续…';
   return '继续推问，⌘↵ 送出…';
 }
 
@@ -43,8 +46,15 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
   const selectedNodeId = useTreeStore((s) => s.selectedNodeId);
   const sendPrompt = useTreeStore((s) => s.sendPrompt);
   const abortStream = useTreeStore((s) => s.abortStream);
+  const abortSessionStreams = useTreeStore((s) => s.abortSessionStreams);
+  const activeStreamSessionId = useTreeStore((s) => s.activeStreamSessionId);
   const streamingNodeIds = useTreeStore((s) => s.streamingNodeIds);
   const loadedSessionId = useTreeStore((s) => s.loadedSessionId);
+  const activeStreamSession = useSessionsStore((s) =>
+    activeStreamSessionId
+      ? s.sessions.find((session) => session.id === activeStreamSessionId) ?? null
+      : null,
+  );
 
   const parentNodeId = selectedNodeId ?? session?.rootNodeId ?? null;
   const parent = parentNodeId ? nodes.get(parentNodeId) : undefined;
@@ -69,10 +79,14 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
 
   const streamingNodeId = streamingNodeIds.size > 0 ? streamingNodeIds.values().next().value ?? null : null;
   const streamingNode = streamingNodeId ? nodes.get(streamingNodeId) : undefined;
+  const streamingCount = streamingNodeIds.size;
 
   const noSession = !loadedSessionId;
   const noProvider = !provider;
-  const disabled = noSession || noProvider || streamingNodeId !== null;
+  const blockedByOtherSession =
+    activeStreamSessionId !== null && activeStreamSessionId !== loadedSessionId;
+  const parentStreaming = parent?.status === 'streaming';
+  const disabled = noSession || noProvider || blockedByOtherSession || parentStreaming;
 
   const submit = async () => {
     const prompt = draft.trim();
@@ -98,21 +112,37 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
 
   return (
     <div className="border-t border-border/60 bg-background">
-      {streamingNodeId && (
+      {blockedByOtherSession && (
         <div className="flex items-center gap-3 border-b border-accent/25 bg-accent/8 px-6 py-1.5">
           <span className="relative inline-flex h-1.5 w-1.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent/60" />
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
           </span>
           <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
-            正在生成 ↳ {streamingNode?.model ?? '…'} · {streamingNode?.content.length ?? 0} 字
+            {activeStreamSession?.title ?? '另一个 session'} 正在生成 · 当前 session 暂停提问
+          </span>
+        </div>
+      )}
+
+      {!blockedByOtherSession && streamingNodeId && (
+        <div className="flex items-center gap-3 border-b border-accent/25 bg-accent/8 px-6 py-1.5">
+          <span className="relative inline-flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent/60" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
+            正在生成 {streamingCount} 个 ↳ {streamingNode?.model ?? '…'} · {streamingNode?.content.length ?? 0} 字
           </span>
           <button
             type="button"
-            onClick={() => abortStream(streamingNodeId)}
+            onClick={() =>
+              streamingCount > 1 && loadedSessionId
+                ? abortSessionStreams(loadedSessionId)
+                : abortStream(streamingNodeId)
+            }
             className="ml-auto flex items-center gap-1 rounded-[2px] border border-accent/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-accent hover:bg-accent hover:text-accent-foreground"
           >
-            中止 <X className="h-2.5 w-2.5" />
+            {streamingCount > 1 ? '中止全部' : '中止'} <X className="h-2.5 w-2.5" />
           </button>
         </div>
       )}
@@ -146,7 +176,8 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
           placeholder={placeholderFor({
             noSession,
             noProvider,
-            streaming: streamingNodeId !== null,
+            blockedByOtherSession,
+            parentStreaming,
           })}
           className={cn(
             'flex-1 resize-none bg-transparent px-0 py-1.5 text-[14.5px] leading-[1.55] outline-none',

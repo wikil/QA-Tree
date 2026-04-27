@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { db, KV_KEYS } from '@/lib/db';
 import { newId } from '@/lib/ids';
+import { discardStreamsForSession } from '@/stores/treeStore';
 import type { QANode, Session } from '@/types';
 
 interface SessionsState {
@@ -12,11 +13,13 @@ interface SessionsState {
   createSession: (title?: string) => Promise<Session>;
   renameSession: (id: string, title: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
+  recordFirstPrompt: (id: string, prompt: string) => Promise<void>;
   setCurrentSessionId: (id: string | null) => Promise<void>;
   touchSession: (id: string) => Promise<void>;
   setSessionProvider: (id: string, providerId: string | undefined) => Promise<void>;
 }
 
+const DEFAULT_SESSION_TITLE = '新会话';
 const sortByUpdatedDesc = (a: Session, b: Session) => b.updatedAt - a.updatedAt;
 
 let hydratePromise: Promise<void> | null = null;
@@ -32,6 +35,11 @@ async function clearCollapsedForSession(sessionId: string) {
   }
 }
 
+function makeTitleFromPrompt(prompt: string): string {
+  const title = prompt.trim().replace(/\s+/g, ' ');
+  return title.length > 36 ? `${title.slice(0, 36)}...` : title;
+}
+
 export const useSessionsStore = create<SessionsState>((set, get) => ({
   hydrated: false,
   sessions: [],
@@ -41,16 +49,28 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     if (get().hydrated) return;
     if (hydratePromise) return hydratePromise;
     hydratePromise = (async () => {
-      const [sessions, currentRecord] = await Promise.all([
+      const [sessions, edges, currentRecord] = await Promise.all([
         db.sessions.toArray(),
+        db.edges.toArray(),
         db.kv.get(KV_KEYS.currentSessionId),
       ]);
-      sessions.sort(sortByUpdatedDesc);
+      const firstPromptBySession = new Map<string, string>();
+      for (const edge of edges.sort((a, b) => a.createdAt - b.createdAt)) {
+        if (!firstPromptBySession.has(edge.sessionId)) {
+          firstPromptBySession.set(edge.sessionId, edge.prompt);
+        }
+      }
+      const hydratedSessions = sessions.map((session) =>
+        session.firstPrompt
+          ? session
+          : { ...session, firstPrompt: firstPromptBySession.get(session.id) },
+      );
+      hydratedSessions.sort(sortByUpdatedDesc);
       const persisted = (currentRecord?.value as string | null | undefined) ?? null;
-      const stillExists = persisted && sessions.some((s) => s.id === persisted);
+      const stillExists = persisted && hydratedSessions.some((s) => s.id === persisted);
       set({
         hydrated: true,
-        sessions,
+        sessions: hydratedSessions,
         currentSessionId: stillExists ? persisted : null,
       });
     })();
@@ -72,7 +92,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     };
     const session: Session = {
       id: sessionId,
-      title: title?.trim() || '新会话',
+      title: title?.trim() || DEFAULT_SESSION_TITLE,
       createdAt: now,
       updatedAt: now,
       rootNodeId,
@@ -102,6 +122,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   },
 
   deleteSession: async (id) => {
+    discardStreamsForSession(id);
     await db.transaction('rw', db.sessions, db.nodes, db.edges, db.kv, async () => {
       await db.nodes.where('sessionId').equals(id).delete();
       await db.edges.where('sessionId').equals(id).delete();
@@ -113,6 +134,29 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       const next = get().sessions[0]?.id ?? null;
       await get().setCurrentSessionId(next);
     }
+  },
+
+  recordFirstPrompt: async (id, prompt) => {
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) {
+      await get().touchSession(id);
+      return;
+    }
+    const now = Date.now();
+    const existing = get().sessions.find((s) => s.id === id);
+    const firstPrompt = existing?.firstPrompt ?? trimmedPrompt;
+    const shouldAutoTitle =
+      !existing || existing.title.trim() === '' || existing.title === DEFAULT_SESSION_TITLE;
+    const title = shouldAutoTitle ? makeTitleFromPrompt(trimmedPrompt) : existing.title;
+
+    await db.sessions.update(id, { firstPrompt, title, updatedAt: now });
+    set((s) => ({
+      sessions: s.sessions
+        .map((sess) =>
+          sess.id === id ? { ...sess, firstPrompt, title, updatedAt: now } : sess,
+        )
+        .sort(sortByUpdatedDesc),
+    }));
   },
 
   setCurrentSessionId: async (id) => {
