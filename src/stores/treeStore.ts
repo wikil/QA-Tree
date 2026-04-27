@@ -27,6 +27,12 @@ interface RetryArgs {
   proxy: ProxyConfig;
 }
 
+export interface SubtreeStats {
+  nodeIds: Set<string>;
+  edgeIds: Set<string>;
+  streamingCount: number;
+}
+
 interface TreeState {
   loadedSessionId: string | null;
   nodes: Map<string, QANode>;
@@ -38,6 +44,8 @@ interface TreeState {
   activeStreamSessionId: string | null;
   /** Streaming nodes for the currently loaded session only. */
   streamingNodeIds: Set<string>;
+  /** Node id whose subtree is being confirmed for deletion. Null = no dialog. */
+  deleteTargetId: string | null;
 
   loadSession: (sessionId: string | null) => Promise<void>;
   selectNode: (id: string | null) => void;
@@ -50,6 +58,8 @@ interface TreeState {
   retryNode: (nodeId: string, args: RetryArgs) => Promise<void>;
   abortStream: (nodeId: string) => void;
   abortSessionStreams: (sessionId: string) => void;
+  requestDeleteSubtree: (nodeId: string | null) => void;
+  deleteNodeSubtree: (nodeId: string) => Promise<void>;
 }
 
 interface StreamRecord {
@@ -155,6 +165,17 @@ function discardRecord(nodeId: string) {
   clearFlushTimer(nodeId);
 }
 
+function discardStreamRecords(nodeIds: Iterable<string>): number {
+  let count = 0;
+  for (const id of nodeIds) {
+    if (streamRecords.has(id)) {
+      discardRecord(id);
+      count++;
+    }
+  }
+  return count;
+}
+
 export function discardStreamsForSession(sessionId: string) {
   for (const rec of Array.from(streamRecords.values())) {
     if (rec.sessionId === sessionId) discardRecord(rec.nodeId);
@@ -167,6 +188,34 @@ function hasChild(edges: ReadonlyMap<string, QAEdge>, nodeId: string): boolean {
     if (edge.fromNodeId === nodeId) return true;
   }
   return false;
+}
+
+export function collectSubtreeStats(
+  edges: ReadonlyMap<string, QAEdge>,
+  rootId: string,
+  streamingNodeIds: ReadonlySet<string>,
+): SubtreeStats {
+  const childrenByParent = new Map<string, string[]>();
+  for (const e of edges.values()) {
+    const arr = childrenByParent.get(e.fromNodeId) ?? [];
+    arr.push(e.toNodeId);
+    childrenByParent.set(e.fromNodeId, arr);
+  }
+  const nodeIds = new Set<string>();
+  const stack = [rootId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (nodeIds.has(id)) continue;
+    nodeIds.add(id);
+    for (const child of childrenByParent.get(id) ?? []) stack.push(child);
+  }
+  const edgeIds = new Set<string>();
+  for (const e of edges.values()) {
+    if (nodeIds.has(e.toNodeId) || nodeIds.has(e.fromNodeId)) edgeIds.add(e.id);
+  }
+  let streamingCount = 0;
+  for (const id of nodeIds) if (streamingNodeIds.has(id)) streamingCount++;
+  return { nodeIds, edgeIds, streamingCount };
 }
 
 async function readCollapsed(sessionId: string): Promise<Set<string>> {
@@ -324,6 +373,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   collapsedNodeIds: new Set(),
   activeStreamSessionId: null,
   streamingNodeIds: new Set(),
+  deleteTargetId: null,
 
   loadSession: async (sessionId) => {
     // Idempotent: same session already loaded -> no-op (callers can fire-and-forget).
@@ -339,6 +389,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
         collapsedNodeIds: new Set(),
         streamingNodeIds: new Set(),
         activeStreamSessionId: getActiveStreamSessionId(),
+        deleteTargetId: null,
       });
       return;
     }
@@ -373,6 +424,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       collapsedNodeIds: collapsed,
       streamingNodeIds: getStreamingNodeIdsForSession(sessionId),
       activeStreamSessionId: getActiveStreamSessionId(),
+      deleteTargetId: null,
     });
   },
 
@@ -520,6 +572,80 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     for (const rec of streamRecords.values()) {
       if (rec.sessionId === sessionId) abortRecord(rec);
     }
+  },
+
+  requestDeleteSubtree: (nodeId) => {
+    if (!nodeId) {
+      set({ deleteTargetId: null });
+      return;
+    }
+    const target = get().nodes.get(nodeId);
+    if (!target || target.role === 'root') return;
+    set({ deleteTargetId: nodeId });
+  },
+
+  deleteNodeSubtree: async (nodeId) => {
+    const sessionId = get().loadedSessionId;
+    if (!sessionId) return;
+    const state = get();
+    const target = state.nodes.get(nodeId);
+    if (!target || target.role === 'root') return;
+
+    const { nodeIds, edgeIds } = collectSubtreeStats(
+      state.edges,
+      nodeId,
+      state.streamingNodeIds,
+    );
+
+    discardStreamRecords(nodeIds);
+
+    await db.transaction('rw', db.nodes, db.edges, async () => {
+      await db.nodes.bulkDelete(Array.from(nodeIds));
+      await db.edges.bulkDelete(Array.from(edgeIds));
+    });
+
+    const parentEdgeId = target.parentEdgeId;
+    const parentNodeId = parentEdgeId
+      ? state.edges.get(parentEdgeId)?.fromNodeId ?? null
+      : null;
+
+    // Track whether any deleted node was actually collapsed; skips the IDB
+    // round-trip for the common case (delete a leaf with no folded children).
+    let collapsedDirty = false;
+
+    set((s) => {
+      if (s.loadedSessionId !== sessionId) return s;
+      const nextNodes = new Map(s.nodes);
+      const nextEdges = new Map(s.edges);
+      for (const id of nodeIds) nextNodes.delete(id);
+      for (const id of edgeIds) nextEdges.delete(id);
+      const nextCollapsed = new Set(s.collapsedNodeIds);
+      for (const id of nodeIds) {
+        if (nextCollapsed.delete(id)) collapsedDirty = true;
+      }
+      const selectedNodeId =
+        s.selectedNodeId && nodeIds.has(s.selectedNodeId) ? parentNodeId : s.selectedNodeId;
+      const selectedEdgeId =
+        s.selectedEdgeId && edgeIds.has(s.selectedEdgeId) ? null : s.selectedEdgeId;
+      const deleteTargetId = s.deleteTargetId === nodeId ? null : s.deleteTargetId;
+      return {
+        nodes: nextNodes,
+        edges: nextEdges,
+        collapsedNodeIds: nextCollapsed,
+        selectedNodeId,
+        selectedEdgeId,
+        deleteTargetId,
+      };
+    });
+
+    if (collapsedDirty) {
+      const persisted = await readCollapsed(sessionId);
+      for (const id of nodeIds) persisted.delete(id);
+      await writeCollapsed(sessionId, persisted);
+    }
+
+    void useSessionsStore.getState().touchSession(sessionId);
+    syncStreamingState();
   },
 }));
 

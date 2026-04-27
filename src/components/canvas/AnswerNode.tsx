@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Plus,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -20,10 +21,12 @@ export interface AnswerNodeData {
   isOnPath: boolean;
   isSelected: boolean;
   isRetryDisabled: boolean;
+  isDeleteDisabled: boolean;
   onToggleCollapse?: (id: string) => void;
   onAddBranch?: (id: string) => void;
   onRetry?: (id: string) => void;
   onExpand?: (id: string) => void;
+  onRequestDelete?: (id: string) => void;
   [key: string]: unknown;
 }
 
@@ -46,10 +49,12 @@ function AnswerNodeComponent({ data }: NodeProps) {
     isOnPath,
     isSelected,
     isRetryDisabled,
+    isDeleteDisabled,
     onToggleCollapse,
     onAddBranch,
     onRetry,
     onExpand,
+    onRequestDelete,
   } = data as AnswerNodeData;
 
   const status = node.status;
@@ -122,6 +127,24 @@ function AnswerNodeComponent({ data }: NodeProps) {
             className="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:enabled:bg-secondary hover:enabled:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             <RefreshCw className={cn('h-3 w-3', isStreaming && 'animate-spin')} />
+          </button>
+          <button
+            type="button"
+            aria-label={t.answer.deleteSubtree}
+            title={
+              isDeleteDisabled
+                ? t.answer.deleteSubtreeDisabledStreaming
+                : t.answer.deleteSubtree
+            }
+            disabled={isDeleteDisabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isDeleteDisabled) return;
+              onRequestDelete?.(node.id);
+            }}
+            className="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:enabled:bg-destructive/10 hover:enabled:text-destructive disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Trash2 className="h-3 w-3" />
           </button>
         </div>
       </div>
@@ -252,6 +275,7 @@ function answerNodePropsEqual(
   if (a.isOnPath !== b.isOnPath) return false;
   if (a.isSelected !== b.isSelected) return false;
   if (a.isRetryDisabled !== b.isRetryDisabled) return false;
+  if (a.isDeleteDisabled !== b.isDeleteDisabled) return false;
   // Callbacks come from useCallback in TreeCanvas — referentially stable, skip.
   return true;
 }

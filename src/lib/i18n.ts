@@ -101,6 +101,15 @@ export const STRINGS = {
       leaf: 'leaf',
       expand: '展开 →',
       addBranch: '新建分支',
+      deleteSubtree: '删除该分支',
+      deleteSubtreeDisabledStreaming: '当前节点仍在生成，请先中止',
+      deleteSubtreeTitle: '删除该分支？',
+      deleteSubtreeBody:
+        '将永久删除当前节点及其下方 {descendants} 个后代节点（共 {edges} 条边）。',
+      deleteSubtreeStreamingWarn:
+        '其中 {streaming} 个回答仍在生成中，将先中止再删除。',
+      deleteSubtreeIrreversible: '此操作不可撤销。',
+      deleteSubtreeConfirm: '永久删除',
     },
     detail: {
       noSelection: '（未选中节点 — 点击画布上节点或边查看详情）',
@@ -300,6 +309,15 @@ export const STRINGS = {
       leaf: 'leaf',
       expand: 'Open →',
       addBranch: 'Add branch',
+      deleteSubtree: 'Delete branch',
+      deleteSubtreeDisabledStreaming: 'This node is still generating — stop it first',
+      deleteSubtreeTitle: 'Delete this branch?',
+      deleteSubtreeBody:
+        'This will permanently delete the selected node and its {descendants} descendant nodes ({edges} edges in total).',
+      deleteSubtreeStreamingWarn:
+        '{streaming} answers are still generating and will be stopped first.',
+      deleteSubtreeIrreversible: 'This action cannot be undone.',
+      deleteSubtreeConfirm: 'Delete forever',
     },
     detail: {
       noSelection: '(No node selected — click a node or edge on the canvas for details)',
@@ -447,3 +465,13 @@ function formatAbsoluteDate(ts: number): string {
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
+
+/** Substitute `{name}` placeholders in i18n strings. Unknown keys are left intact. */
+export function fillTemplate(
+  template: string,
+  vars: Record<string, string | number>,
+): string {
+  return template.replace(/\{(\w+)\}/g, (_, key) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : `{${key}}`,
+  );
+}

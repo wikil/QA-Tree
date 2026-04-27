@@ -19,6 +19,7 @@ import { PromptEdge, type PromptEdgeData } from './PromptEdge';
 import { StartPill } from './StartPill';
 import { CanvasToolbar } from './CanvasToolbar';
 import { EmptyState } from './EmptyState';
+import { DeleteSubtreeDialog } from './DeleteSubtreeDialog';
 import {
   layoutTree,
   NODE_HEIGHT,
@@ -64,6 +65,8 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
   const expandAll = useTreeStore((s) => s.expandAll);
   const collapseAll = useTreeStore((s) => s.collapseAll);
   const retryNode = useTreeStore((s) => s.retryNode);
+
+  const requestDeleteSubtree = useTreeStore((s) => s.requestDeleteSubtree);
 
   const { fitView, setCenter } = useReactFlow();
   const didInitialFit = useRef(false);
@@ -147,6 +150,11 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
     [selectNode],
   );
 
+  const handleRequestDelete = useCallback(
+    (id: string) => requestDeleteSubtree(id),
+    [requestDeleteSubtree],
+  );
+
   const reactFlowNodes: Node[] = useMemo(() => {
     const rfNodes: Node[] = [];
     rfNodes.push({
@@ -170,10 +178,12 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         isOnPath: highlight.nodeIds.has(pn.id),
         isSelected: selectedNodeId === pn.id,
         isRetryDisabled: streamingNodeIds.has(pn.id) || childCount > 0,
+        isDeleteDisabled: streamingNodeIds.has(pn.id),
         onToggleCollapse: toggleCollapse,
         onAddBranch: handleAddBranch,
         onRetry: handleRetry,
         onExpand: handleExpand,
+        onRequestDelete: handleRequestDelete,
       };
       rfNodes.push({
         id: pn.id,
@@ -199,6 +209,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
     handleAddBranch,
     handleRetry,
     handleExpand,
+    handleRequestDelete,
   ]);
 
   const reactFlowEdges: Edge[] = useMemo(() => {
@@ -341,6 +352,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
           </ReactFlow>
         )}
       </div>
+      <DeleteSubtreeDialog />
     </div>
   );
 }

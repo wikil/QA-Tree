@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Markdown } from '@/components/Markdown';
 import { useTreeStore } from '@/stores/treeStore';
@@ -42,8 +42,10 @@ export function DetailPanel() {
   const edges = useTreeStore((s) => s.edges);
   const selectedNodeId = useTreeStore((s) => s.selectedNodeId);
   const selectedEdgeId = useTreeStore((s) => s.selectedEdgeId);
+  const streamingNodeIds = useTreeStore((s) => s.streamingNodeIds);
   const selectNode = useTreeStore((s) => s.selectNode);
   const selectEdge = useTreeStore((s) => s.selectEdge);
+  const requestDeleteSubtree = useTreeStore((s) => s.requestDeleteSubtree);
 
   const [open, setOpen] = useState(false);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
@@ -136,6 +138,13 @@ export function DetailPanel() {
   const selectedNode = selectedNodeId ? nodes.get(selectedNodeId) : undefined;
   const selectedEdge = selectedEdgeId ? edges.get(selectedEdgeId) : undefined;
 
+  // Streaming descendants don't block deletion: the dialog warns and the
+  // store action aborts them. Only the clicked node itself blocks.
+  const canDeleteSelected =
+    selectedNode != null &&
+    selectedNode.role !== 'root' &&
+    !streamingNodeIds.has(selectedNode.id);
+
   return (
     <div
       className="flex shrink-0 flex-col overflow-hidden border-t border-border/60 bg-card/95 transition-[height] duration-200 ease-out"
@@ -210,7 +219,12 @@ export function DetailPanel() {
       {open && hasSelection && (
         <div className="flex flex-1 flex-col overflow-hidden border-t border-border/30">
           {selectedNode && selectedNode.role !== 'root' && (
-            <NodeMetaStrip node={selectedNode} />
+            <NodeMetaStrip
+              node={selectedNode}
+              canDelete={canDeleteSelected}
+              streaming={streamingNodeIds.has(selectedNode.id)}
+              onDelete={() => requestDeleteSubtree(selectedNode.id)}
+            />
           )}
           {selectedEdge && !selectedNode && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/30 px-8 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -262,7 +276,18 @@ export function DetailPanel() {
   );
 }
 
-function NodeMetaStrip({ node }: { node: QANode }) {
+function NodeMetaStrip({
+  node,
+  canDelete,
+  streaming,
+  onDelete,
+}: {
+  node: QANode;
+  canDelete: boolean;
+  streaming: boolean;
+  onDelete: () => void;
+}) {
+  const { t } = useI18n();
   const tokens = formatTokenUsage(node.tokenUsage);
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/30 px-8 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -279,6 +304,20 @@ function NodeMetaStrip({ node }: { node: QANode }) {
           · {node.errorMessage}
         </span>
       )}
+      <button
+        type="button"
+        disabled={!canDelete}
+        title={
+          streaming
+            ? t.answer.deleteSubtreeDisabledStreaming
+            : t.answer.deleteSubtree
+        }
+        onClick={onDelete}
+        className="ml-auto flex items-center gap-1 rounded-[2px] border border-transparent px-1.5 py-px text-destructive/80 transition-colors hover:enabled:border-destructive/50 hover:enabled:bg-destructive/10 hover:enabled:text-destructive disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <Trash2 className="h-3 w-3" />
+        <span>{t.answer.deleteSubtree}</span>
+      </button>
     </div>
   );
 }
