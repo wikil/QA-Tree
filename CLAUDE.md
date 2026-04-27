@@ -54,5 +54,4 @@ pnpm proxy        # 可选 CORS 兜底，仅监听 127.0.0.1:8787
 - **前端设计走 `frontend-design` skill**：涉及 UI/视觉/组件/页面/交互的设计或实现（新建组件、画布样式、主题、节点/边样式、shadcn 组合、布局打磨等），必须调用 `frontend-design` skill 产出，不要凭直觉手写避免落入 AI 通用样式。
 
 ## Design Doc Context
-
-`.claude/plans/abstract-doodling-flamingo.md` 是设计冻结文档。本 CLAUDE.md 只承载**长效原则与红线**；任何"具体怎么做"的问题都先翻设计文档，**不要在 CLAUDE.md 里复刻细节**。
+Plan/design 文档 Context 节必须**冷启动可读**——未参与讨论的 reviewer 能 grasp：动机、被否决备选 + 理由、ethics 红线、scope 边界、review 历史。这里的啰嗦是目的。`.claude/plans/abstract-doodling-flamingo.md` 是设计冻结文档。本 CLAUDE.md 只承载**长效原则与红线**；任何"具体怎么做"的问题都先翻设计文档，**不要在 CLAUDE.md 里复刻细节**。
