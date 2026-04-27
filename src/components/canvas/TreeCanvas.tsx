@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -25,9 +25,12 @@ import {
   NODE_WIDTH,
   START_NODE_ID,
 } from './layout';
-import { pathHighlight } from './pathHighlight';
-import { fakeEdges, fakeNodes, fakeRootNodeId, fakeSession } from './fakeData';
-import type { QAEdge, QANode } from '@/types';
+import { pathHighlight, EMPTY_HIGHLIGHT } from './pathHighlight';
+import { useTreeStore } from '@/stores/treeStore';
+import { useResolvedProvider } from '@/hooks/useResolvedProvider';
+import { walkPathToRoot } from '@/lib/context';
+import { summarizeText } from '@/lib/format';
+import type { QANode } from '@/types';
 
 const nodeTypes = {
   answer: AnswerNode,
@@ -39,54 +42,48 @@ const edgeTypes = {
 };
 
 interface TreeCanvasProps {
-  /** Optional override — defaults to fake demo data. */
-  nodes?: QANode[];
-  edges?: QAEdge[];
-  rootNodeId?: string;
-  sessionTitle?: string;
+  onAddBranchFocus?: () => void;
 }
 
-function TreeCanvasInner({
-  nodes: nodesProp,
-  edges: edgesProp,
-  rootNodeId: rootProp,
-  sessionTitle: titleProp,
-}: TreeCanvasProps) {
-  const nodesData = nodesProp ?? fakeNodes;
-  const edgesData = edgesProp ?? fakeEdges;
-  const rootNodeId = rootProp ?? fakeRootNodeId;
-  const sessionTitle = titleProp ?? fakeSession.title;
+function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
+  const { session, provider, proxy } = useResolvedProvider();
+  const sessionTitle = session?.title ?? '（未命名会话）';
+  const rootNodeId = session?.rootNodeId ?? '';
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(new Set());
+  const nodesMap = useTreeStore((s) => s.nodes);
+  const edgesMap = useTreeStore((s) => s.edges);
+  const selectedNodeId = useTreeStore((s) => s.selectedNodeId);
+  const selectedEdgeId = useTreeStore((s) => s.selectedEdgeId);
+  const collapsedNodeIds = useTreeStore((s) => s.collapsedNodeIds);
+  const selectNode = useTreeStore((s) => s.selectNode);
+  const selectEdge = useTreeStore((s) => s.selectEdge);
+  const toggleCollapse = useTreeStore((s) => s.toggleCollapse);
+  const expandAll = useTreeStore((s) => s.expandAll);
+  const collapseAll = useTreeStore((s) => s.collapseAll);
+  const retryNode = useTreeStore((s) => s.retryNode);
 
   const { fitView, setCenter } = useReactFlow();
   const didInitialFit = useRef(false);
 
-  const nodesMap = useMemo(
-    () => new Map(nodesData.map((n) => [n.id, n] as const)),
-    [nodesData],
-  );
-  const edgesMap = useMemo(
-    () => new Map(edgesData.map((e) => [e.id, e] as const)),
-    [edgesData],
-  );
+  // Reset initial-fit on session switch — kept in an effect so render is pure.
+  useEffect(() => {
+    didInitialFit.current = false;
+  }, [session?.id]);
 
-  const isEmpty = nodesData.length <= 1; // root only
+  const isEmpty = nodesMap.size <= 1;
 
-  // child counts per node id (children visible OR hidden — we want the raw count too)
+  // childrenByParent / descendantCount: structurally stable during streaming
+  // because edges are write-once (created on send, never mutated by deltas).
   const childrenByParent = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const e of edgesData) {
+    for (const e of edgesMap.values()) {
       const arr = m.get(e.fromNodeId) ?? [];
       arr.push(e.toNodeId);
       m.set(e.fromNodeId, arr);
     }
     return m;
-  }, [edgesData]);
+  }, [edgesMap]);
 
-  // descendant counts (recursive) for collapsed-badge "+N" labels
   const descendantCount = useMemo(() => {
     const m = new Map<string, number>();
     const walk = (id: string): number => {
@@ -97,10 +94,13 @@ function TreeCanvasInner({
       m.set(id, total);
       return total;
     };
-    for (const id of nodesMap.keys()) walk(id);
+    if (rootNodeId) walk(rootNodeId);
     return m;
-  }, [nodesMap, childrenByParent]);
+  }, [childrenByParent, rootNodeId]);
 
+  // Layout depends only on structure (size + edges + collapsed + root). Streaming
+  // content updates change `nodesMap` reference but not size, so dagre is skipped
+  // during streaming — the canvas would otherwise re-layout 10-50 times/sec.
   const layout = useMemo(
     () =>
       layoutTree({
@@ -109,41 +109,43 @@ function TreeCanvasInner({
         collapsedNodeIds,
         rootNodeId,
       }),
-    [nodesMap, edgesMap, collapsedNodeIds, rootNodeId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nodesMap.size, edgesMap, collapsedNodeIds, rootNodeId],
   );
 
-  const highlight = useMemo(
-    () => pathHighlight({ nodes: nodesMap, edges: edgesMap, selectedNodeId }),
-    [nodesMap, edgesMap, selectedNodeId],
+  // pathHighlight only walks via edge chain; dropping `nodesMap` from deps
+  // keeps the result stable across streaming deltas.
+  const highlight = useMemo(() => {
+    if (!selectedNodeId) return EMPTY_HIGHLIGHT;
+    return pathHighlight({ nodes: nodesMap, edges: edgesMap, selectedNodeId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgesMap, selectedNodeId]);
+
+  const handleAddBranch = useCallback(
+    (id: string) => {
+      selectNode(id);
+      onAddBranchFocus?.();
+    },
+    [selectNode, onAddBranchFocus],
   );
 
-  const handleToggleCollapse = useCallback((id: string) => {
-    setCollapsedNodeIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const handleRetry = useCallback(
+    (id: string) => {
+      if (!provider) return;
+      void retryNode(id, { provider, proxy });
+    },
+    [provider, proxy, retryNode],
+  );
 
-  const handleAddBranch = useCallback((id: string) => {
-    setSelectedNodeId(id);
-    setSelectedEdgeId(null);
-    // Real branch creation lives in milestone 6 — here we just focus the node.
-  }, []);
-
-  const handleRetry = useCallback((_id: string) => {
-    // Stub — wires to treeStore.retryNode in milestone 6.
-  }, []);
-
-  const handleExpand = useCallback((id: string) => {
-    setSelectedNodeId(id);
-    setSelectedEdgeId(null);
-  }, []);
+  const handleExpand = useCallback(
+    (id: string) => {
+      selectNode(id);
+    },
+    [selectNode],
+  );
 
   const reactFlowNodes: Node[] = useMemo(() => {
     const rfNodes: Node[] = [];
-    // Start pill
     rfNodes.push({
       id: START_NODE_ID,
       type: 'start',
@@ -154,7 +156,7 @@ function TreeCanvasInner({
       focusable: false,
     });
     for (const pn of layout.nodes) {
-      const node = nodesMap.get(pn.id);
+      const node: QANode | undefined = nodesMap.get(pn.id);
       if (!node) continue;
       const childCount = (childrenByParent.get(pn.id) ?? []).length;
       const data: AnswerNodeData = {
@@ -164,7 +166,7 @@ function TreeCanvasInner({
         isCollapsed: collapsedNodeIds.has(pn.id),
         isOnPath: highlight.nodeIds.has(pn.id),
         isSelected: selectedNodeId === pn.id,
-        onToggleCollapse: handleToggleCollapse,
+        onToggleCollapse: toggleCollapse,
         onAddBranch: handleAddBranch,
         onRetry: handleRetry,
         onExpand: handleExpand,
@@ -188,7 +190,7 @@ function TreeCanvasInner({
     collapsedNodeIds,
     highlight.nodeIds,
     selectedNodeId,
-    handleToggleCollapse,
+    toggleCollapse,
     handleAddBranch,
     handleRetry,
     handleExpand,
@@ -215,7 +217,6 @@ function TreeCanvasInner({
     });
   }, [layout.edges, highlight.edgeIds, selectedNodeId, selectedEdgeId]);
 
-  // Initial fit-view once layout has rendered
   useEffect(() => {
     if (didInitialFit.current) return;
     if (reactFlowNodes.length <= 1) return;
@@ -225,21 +226,24 @@ function TreeCanvasInner({
     });
   }, [reactFlowNodes.length, fitView]);
 
-  const onNodeClick: NodeMouseHandler = useCallback((_, node) => {
-    if (node.id === START_NODE_ID) return;
-    setSelectedNodeId(node.id);
-    setSelectedEdgeId(null);
-  }, []);
+  const onNodeClick: NodeMouseHandler = useCallback(
+    (_, node) => {
+      if (node.id === START_NODE_ID) return;
+      selectNode(node.id);
+    },
+    [selectNode],
+  );
 
-  const onEdgeClick: EdgeMouseHandler = useCallback((_, edge) => {
-    setSelectedEdgeId(edge.id);
-    setSelectedNodeId(null);
-  }, []);
+  const onEdgeClick: EdgeMouseHandler = useCallback(
+    (_, edge) => {
+      selectEdge(edge.id);
+    },
+    [selectEdge],
+  );
 
   const onPaneClick = useCallback(() => {
-    setSelectedNodeId(null);
-    setSelectedEdgeId(null);
-  }, []);
+    selectNode(null);
+  }, [selectNode]);
 
   const handleFit = useCallback(() => {
     void fitView({ padding: 0.18, duration: 480 });
@@ -247,44 +251,26 @@ function TreeCanvasInner({
 
   const handleReset = useCallback(() => {
     didInitialFit.current = false;
-    setSelectedNodeId(null);
-    setSelectedEdgeId(null);
-    setCollapsedNodeIds(new Set());
+    selectNode(null);
+    void expandAll();
     setCenter(layout.startPos.x + 120, layout.startPos.y + 18, {
       zoom: 0.9,
       duration: 480,
     });
-  }, [layout.startPos.x, layout.startPos.y, setCenter]);
+  }, [selectNode, expandAll, layout.startPos.x, layout.startPos.y, setCenter]);
 
-  const handleCollapseAll = useCallback(() => {
-    const next = new Set<string>();
-    for (const [id, kids] of childrenByParent.entries()) {
-      if (id === rootNodeId) continue;
-      if (kids.length > 0) next.add(id);
-    }
-    setCollapsedNodeIds(next);
-  }, [childrenByParent, rootNodeId]);
-
-  const handleExpandAll = useCallback(() => {
-    setCollapsedNodeIds(new Set());
-  }, []);
-
-  // Path label for toolbar — short version of breadcrumbs
+  // Compact path label for the toolbar — 'root › Q1 › Q2 › Q3'.
+  // Walks via edge chain only; nodesMap content never affects the result.
   const pathLabel = useMemo(() => {
     if (!selectedNodeId) return undefined;
-    let cur: QANode | undefined = nodesMap.get(selectedNodeId);
-    const trail: string[] = [];
-    const seen = new Set<string>();
-    while (cur && cur.parentEdgeId && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      const e = edgesMap.get(cur.parentEdgeId);
-      if (!e) break;
-      trail.unshift(e.prompt.slice(0, 14));
-      cur = nodesMap.get(e.fromNodeId);
-    }
-    if (trail.length === 0) return 'root';
-    return 'root › ' + trail.join(' › ');
-  }, [selectedNodeId, nodesMap, edgesMap]);
+    const walk = walkPathToRoot(nodesMap, edgesMap, selectedNodeId);
+    const segs = walk
+      .map((s) => s.edge && summarizeText(s.edge.prompt, 14))
+      .filter((s): s is string => !!s);
+    if (segs.length === 0) return 'root';
+    return 'root › ' + segs.join(' › ');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgesMap, selectedNodeId]);
 
   const visibleAnswerCount = layout.nodes.length;
   const collapsedCount = collapsedNodeIds.size;
@@ -298,8 +284,8 @@ function TreeCanvasInner({
         collapsedCount={collapsedCount}
         onFit={handleFit}
         onReset={handleReset}
-        onCollapseAll={handleCollapseAll}
-        onExpandAll={handleExpandAll}
+        onCollapseAll={() => void collapseAll()}
+        onExpandAll={() => void expandAll()}
       />
       <div className="relative flex-1 overflow-hidden">
         {isEmpty ? (

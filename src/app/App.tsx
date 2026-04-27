@@ -1,17 +1,75 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Settings, Plus, Search } from 'lucide-react';
 import { TreeCanvas } from '@/components/canvas/TreeCanvas';
-import { fakeSession } from '@/components/canvas/fakeData';
+import { DetailPanel } from '@/components/canvas/DetailPanel';
+import { AskBox, type AskBoxHandle } from '@/components/canvas/AskBox';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-
-const PLACEHOLDER_SESSIONS = [
-  { id: fakeSession.id, title: fakeSession.title, count: 7 },
-  { id: 'demo-2', title: '傅里叶变换的几何直觉', count: 4 },
-  { id: 'demo-3', title: 'CAP 与一致性模型', count: 2 },
-];
+import { formatRelativeTime } from '@/lib/format';
+import { useSessionsStore } from '@/stores/sessionsStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { useTreeStore } from '@/stores/treeStore';
 
 export default function App() {
+  const askBoxRef = useRef<AskBoxHandle | null>(null);
+
+  const sessions = useSessionsStore((s) => s.sessions);
+  const currentSessionId = useSessionsStore((s) => s.currentSessionId);
+  const sessionsHydrated = useSessionsStore((s) => s.hydrated);
+  const hydrateSessions = useSessionsStore((s) => s.hydrate);
+  const createSession = useSessionsStore((s) => s.createSession);
+  const setCurrentSessionId = useSessionsStore((s) => s.setCurrentSessionId);
+
+  const hydrateSettings = useSettingsStore((s) => s.hydrate);
+  const settingsHydrated = useSettingsStore((s) => s.hydrated);
+
+  const loadSession = useTreeStore((s) => s.loadSession);
+  const treeNodeCount = useTreeStore((s) => s.nodes.size);
+
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    void hydrateSessions();
+    void hydrateSettings();
+  }, [hydrateSessions, hydrateSettings]);
+
+  // loadSession is idempotent — fire whenever currentSessionId changes; same-id
+  // re-fires are no-ops in the store.
+  useEffect(() => {
+    if (!sessionsHydrated) return;
+    void loadSession(currentSessionId);
+  }, [sessionsHydrated, currentSessionId, loadSession]);
+
+  const focusAskBox = useCallback(() => {
+    askBoxRef.current?.focus();
+  }, []);
+
+  const handleNewSession = useCallback(async () => {
+    await createSession();
+    focusAskBox();
+  }, [createSession, focusAskBox]);
+
+  // ⌘N / Ctrl+N to create a new session
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        // Avoid hijacking native new-window in browsers that allow it (most don't intercept Cmd+N anyway)
+        if (e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        void handleNewSession();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleNewSession]);
+
+  const filteredSessions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s) => s.title.toLowerCase().includes(q));
+  }, [sessions, search]);
+
   return (
     <div className="flex h-full w-full">
       <aside className="flex w-[260px] shrink-0 flex-col border-r border-border bg-card/40">
@@ -42,6 +100,7 @@ export default function App() {
         <div className="border-b border-border px-3 py-2.5">
           <button
             type="button"
+            onClick={() => void handleNewSession()}
             className={cn(
               'flex w-full items-center justify-between gap-2 rounded-sm border border-hairline/50 bg-background/40 px-2.5 py-1.5',
               'font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground',
@@ -61,6 +120,8 @@ export default function App() {
             <Search className="h-3 w-3 text-muted-foreground" />
             <input
               type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               placeholder="搜索 sessions…"
               className="w-full bg-transparent font-mono text-[11px] tracking-wide text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
             />
@@ -68,30 +129,62 @@ export default function App() {
         </div>
 
         <div className="flex-1 overflow-y-auto py-1">
-          {PLACEHOLDER_SESSIONS.map((s, i) => (
-            <button
-              key={s.id}
-              type="button"
-              className={cn(
-                'group/item flex w-full flex-col items-start gap-1 border-l-2 px-3.5 py-2.5 text-left transition-colors',
-                i === 0
-                  ? 'border-accent bg-accent/5'
-                  : 'border-transparent hover:border-hairline/40 hover:bg-card/60',
+          {!sessionsHydrated ? (
+            <div className="px-3.5 py-4 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/60">
+              loading…
+            </div>
+          ) : filteredSessions.length === 0 ? (
+            <div className="flex flex-col gap-2 px-4 py-6 text-center">
+              <span className="font-display text-[13px] italic text-muted-foreground/80">
+                {sessions.length === 0
+                  ? '还没有任何会话。'
+                  : '没有匹配的会话。'}
+              </span>
+              {sessions.length === 0 && (
+                <button
+                  type="button"
+                  onClick={() => void handleNewSession()}
+                  className="mx-auto mt-1 flex items-center gap-1.5 rounded-[2px] border border-accent/60 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-accent hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Plus className="h-3 w-3" /> 新建第一个会话
+                </button>
               )}
-            >
-              <span
-                className="font-display text-[14.5px] leading-tight text-foreground"
-                style={{ fontFeatureSettings: '"ss01"' }}
-              >
-                {s.title}
-              </span>
-              <span className="flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
-                <span>{s.count} nodes</span>
-                <span className="text-muted-foreground/40">·</span>
-                <span>just now</span>
-              </span>
-            </button>
-          ))}
+            </div>
+          ) : (
+            filteredSessions.map((s) => {
+              const isCurrent = s.id === currentSessionId;
+              const nodeCount = isCurrent ? treeNodeCount : undefined;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => void setCurrentSessionId(s.id)}
+                  className={cn(
+                    'group/item flex w-full flex-col items-start gap-1 border-l-2 px-3.5 py-2.5 text-left transition-colors',
+                    isCurrent
+                      ? 'border-accent bg-accent/5'
+                      : 'border-transparent hover:border-hairline/40 hover:bg-card/60',
+                  )}
+                >
+                  <span
+                    className="font-display text-[14.5px] leading-tight text-foreground"
+                    style={{ fontFeatureSettings: '"ss01"' }}
+                  >
+                    {s.title}
+                  </span>
+                  <span className="flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                    {nodeCount !== undefined && (
+                      <>
+                        <span>{Math.max(0, nodeCount - 1)} nodes</span>
+                        <span className="text-muted-foreground/40">·</span>
+                      </>
+                    )}
+                    <span>{formatRelativeTime(s.updatedAt)}</span>
+                  </span>
+                </button>
+              );
+            })
+          )}
         </div>
 
         <div className="border-t border-border px-4 py-3">
@@ -106,37 +199,18 @@ export default function App() {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         <section className="flex-1 overflow-hidden">
-          <TreeCanvas />
-        </section>
-        <section className="h-[260px] shrink-0 border-t border-border bg-card/40">
-          <div className="flex h-full flex-col">
-            <div className="flex items-center gap-2 border-b border-border px-4 py-2">
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                detail
-              </span>
-              <span className="text-muted-foreground/40">›</span>
-              <span className="font-display text-[12.5px] italic text-muted-foreground">
-                选择节点或边以查看完整内容
+          {!settingsHydrated ? (
+            <div className="flex h-full w-full items-center justify-center">
+              <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-muted-foreground">
+                loading…
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto px-6 py-5">
-              <div className="max-w-[720px]">
-                <p className="font-display text-[14.5px] leading-[1.7] text-foreground/80">
-                  Detail panel 占位（里程碑 6 / 7）。这里会渲染选中节点的完整 markdown
-                  或选中边的完整 prompt，并常驻一个 AskBox 用于继续追问。
-                </p>
-                <div className="mt-4 flex items-center gap-2">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                    next ↦
-                  </span>
-                  <span className="font-mono text-[10.5px] text-foreground/70">
-                    M6 streaming pipeline · M7 multi-branch interactions
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+          ) : (
+            <TreeCanvas onAddBranchFocus={focusAskBox} />
+          )}
         </section>
+        <DetailPanel />
+        <AskBox ref={askBoxRef} />
       </main>
     </div>
   );

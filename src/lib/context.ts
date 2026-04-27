@@ -13,37 +13,78 @@ export interface PathStep {
   node: QANode;
 }
 
+export interface WalkStep {
+  /** Node at this step. `null` only when the chain hits a missing parent (lenient mode). */
+  node: QANode | null;
+  /** Incoming edge from parent. `null` for root. */
+  edge: QAEdge | null;
+}
+
 /**
- * 从目标节点回溯到 root，返回沿途的边/节点对（不含 root，按 root → 当前节点顺序）。
- * 如果路径任一节点缺失（孤儿数据），抛错而不是悄悄返回不完整路径——这是项目灵魂，宁可失败也不污染。
+ * Walk the parentEdge chain from `leafId` up to root, returning steps in
+ * root → leaf order. Single source of truth for every breadcrumb / path
+ * computation in the app.
+ *
+ * - `strict: true` throws on any missing link or cycle (used by LLM context
+ *   builder where a corrupted path must not silently truncate).
+ * - `strict: false` returns whatever it could walk; on broken link, returns
+ *   the partial trail with the broken edge replaced by null.
+ */
+export function walkPathToRoot(
+  nodes: ReadonlyMap<string, QANode>,
+  edges: ReadonlyMap<string, QAEdge>,
+  leafId: string,
+  opts: { strict?: boolean } = {},
+): WalkStep[] {
+  const strict = opts.strict ?? false;
+  const leaf = nodes.get(leafId);
+  if (!leaf) {
+    if (strict) throw new Error(`节点不存在：${leafId}`);
+    return [];
+  }
+  const reversed: WalkStep[] = [];
+  let cur: QANode | undefined = leaf;
+  let incoming: QAEdge | null = null;
+  const seen = new Set<string>();
+  while (cur) {
+    if (seen.has(cur.id)) {
+      if (strict) throw new Error(`检测到环：${cur.id}`);
+      break;
+    }
+    seen.add(cur.id);
+    reversed.push({ node: cur, edge: incoming });
+    if (!cur.parentEdgeId) break;
+    const edge = edges.get(cur.parentEdgeId);
+    if (!edge) {
+      if (strict) throw new Error(`入边缺失：${cur.parentEdgeId}`);
+      break;
+    }
+    incoming = edge;
+    cur = nodes.get(edge.fromNodeId);
+    if (!cur && strict) throw new Error(`父节点缺失：${edge.fromNodeId}`);
+  }
+  if (strict && (reversed.length === 0 || reversed[reversed.length - 1].node?.role !== 'root')) {
+    throw new Error('未回溯到 root');
+  }
+  return reversed.reverse();
+}
+
+/**
+ * Strict variant returning {edge, node} pairs for every step BELOW root
+ * (root itself omitted). Used by the LLM context builder.
  */
 export function tracePath(
   nodes: ReadonlyMap<string, QANode>,
   edges: ReadonlyMap<string, QAEdge>,
   targetNodeId: string,
 ): PathStep[] {
-  const target = nodes.get(targetNodeId);
-  if (!target) throw new Error(`节点不存在：${targetNodeId}`);
-
-  const reversed: PathStep[] = [];
-  let current: QANode | undefined = target;
-  const seen = new Set<string>();
-
-  while (current && current.parentEdgeId) {
-    if (seen.has(current.id)) throw new Error(`检测到环：${current.id}`);
-    seen.add(current.id);
-    const edge = edges.get(current.parentEdgeId);
-    if (!edge) throw new Error(`入边缺失：${current.parentEdgeId}`);
-    reversed.push({ edge, node: current });
-    current = nodes.get(edge.fromNodeId);
-    if (!current) throw new Error(`父节点缺失：${edge.fromNodeId}`);
+  const walk = walkPathToRoot(nodes, edges, targetNodeId, { strict: true });
+  const steps: PathStep[] = [];
+  for (const { edge, node } of walk) {
+    if (!edge || !node) continue;
+    steps.push({ edge, node });
   }
-
-  if (!current || current.role !== 'root') {
-    throw new Error('未回溯到 root');
-  }
-
-  return reversed.reverse();
+  return steps;
 }
 
 export function buildSystemPrompt(provider: Pick<ProviderConfig, 'systemPrompt'>): string {

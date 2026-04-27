@@ -8,7 +8,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { QANode } from '@/types';
+import { summarizeText, formatTokenUsage } from '@/lib/format';
+import type { NodeStatus, QANode } from '@/types';
 
 export interface AnswerNodeData {
   node: QANode;
@@ -24,22 +25,14 @@ export interface AnswerNodeData {
   [key: string]: unknown;
 }
 
-const ROLE_BADGE = '⌁'; // small editorial glyph for the model strip
+const ROLE_BADGE = '⌁';
 
-function summarize(content: string): string {
-  if (!content) return '';
-  // First "段" — empty-line break — or first 280 chars.
-  const firstBlock = content.split(/\n\s*\n/)[0]?.trim() ?? '';
-  if (firstBlock.length > 280) return firstBlock.slice(0, 280).trimEnd() + '…';
-  return firstBlock;
-}
-
-function formatTokens(usage?: { prompt: number; completion: number }) {
-  if (!usage) return null;
-  const total = (usage.prompt ?? 0) + (usage.completion ?? 0);
-  if (total < 1000) return `${total} tok`;
-  return `${(total / 1000).toFixed(1)}k tok`;
-}
+export const STATUS_BADGE_STYLE: Record<NodeStatus, string> = {
+  streaming: 'border-accent/70 text-accent',
+  done: 'border-hairline/40 text-foreground/70',
+  aborted: 'border-accent/50 text-accent',
+  error: 'border-destructive/60 text-destructive',
+};
 
 function AnswerNodeComponent({ data }: NodeProps) {
   const {
@@ -60,8 +53,8 @@ function AnswerNodeComponent({ data }: NodeProps) {
   const isAborted = status === 'aborted';
   const isError = status === 'error';
   const hasChildren = childCount > 0;
-  const summary = summarize(node.content);
-  const tokens = formatTokens(node.tokenUsage);
+  const summary = summarizeText(node.content, 280, 'firstBlock');
+  const tokens = formatTokenUsage(node.tokenUsage);
 
   return (
     <div
@@ -227,4 +220,30 @@ function AnswerNodeComponent({ data }: NodeProps) {
   );
 }
 
-export const AnswerNode = memo(AnswerNodeComponent);
+function answerNodePropsEqual(
+  prev: Readonly<NodeProps>,
+  next: Readonly<NodeProps>,
+): boolean {
+  if (prev.id !== next.id) return false;
+  if (prev.selected !== next.selected) return false;
+  if (prev.dragging !== next.dragging) return false;
+  const a = prev.data as AnswerNodeData;
+  const b = next.data as AnswerNodeData;
+  if (a === b) return true;
+  if (a.node !== b.node) {
+    if (a.node.content !== b.node.content) return false;
+    if (a.node.status !== b.node.status) return false;
+    if (a.node.errorMessage !== b.node.errorMessage) return false;
+    if (a.node.model !== b.node.model) return false;
+    if (a.node.tokenUsage !== b.node.tokenUsage) return false;
+  }
+  if (a.childCount !== b.childCount) return false;
+  if (a.hiddenDescendantCount !== b.hiddenDescendantCount) return false;
+  if (a.isCollapsed !== b.isCollapsed) return false;
+  if (a.isOnPath !== b.isOnPath) return false;
+  if (a.isSelected !== b.isSelected) return false;
+  // Callbacks come from useCallback in TreeCanvas — referentially stable, skip.
+  return true;
+}
+
+export const AnswerNode = memo(AnswerNodeComponent, answerNodePropsEqual);

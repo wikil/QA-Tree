@@ -34,6 +34,8 @@ interface TreeState {
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
   collapsedNodeIds: Set<string>;
+  /** Set during runStream; cleared on done/abort/error. Single source of truth for "is anything streaming right now". */
+  streamingNodeIds: Set<string>;
 
   loadSession: (sessionId: string | null) => Promise<void>;
   selectNode: (id: string | null) => void;
@@ -108,6 +110,15 @@ function abortAndCleanup(nodeId: string) {
   streamControllers.delete(nodeId);
 }
 
+function markStreaming(nodeId: string, on: boolean) {
+  useTreeStore.setState((s) => {
+    const next = new Set(s.streamingNodeIds);
+    if (on) next.add(nodeId);
+    else next.delete(nodeId);
+    return { streamingNodeIds: next };
+  });
+}
+
 async function runStream(args: {
   nodeId: string;
   parentNodeId: string;
@@ -118,6 +129,7 @@ async function runStream(args: {
   const { nodeId, parentNodeId, promptForContext, provider, proxy } = args;
   const ctl = new AbortController();
   streamControllers.set(nodeId, ctl);
+  markStreaming(nodeId, true);
 
   const state = useTreeStore.getState();
   let messages;
@@ -183,6 +195,7 @@ async function runStream(args: {
     }
   } finally {
     streamControllers.delete(nodeId);
+    markStreaming(nodeId, false);
     await flushNode(nodeId);
   }
 }
@@ -194,9 +207,12 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   selectedNodeId: null,
   selectedEdgeId: null,
   collapsedNodeIds: new Set(),
+  streamingNodeIds: new Set(),
 
   loadSession: async (sessionId) => {
-    // 中止当前 session 所有在飞流式
+    // Idempotent: same session already loaded → no-op (callers can fire-and-forget).
+    if (get().loadedSessionId === sessionId) return;
+
     for (const id of streamControllers.keys()) abortAndCleanup(id);
     for (const id of flushTimers.keys()) await flushNode(id);
 
@@ -208,6 +224,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
         selectedNodeId: null,
         selectedEdgeId: null,
         collapsedNodeIds: new Set(),
+        streamingNodeIds: new Set(),
       });
       return;
     }
@@ -224,6 +241,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       selectedNodeId: null,
       selectedEdgeId: null,
       collapsedNodeIds: collapsed,
+      streamingNodeIds: new Set(),
     });
   },
 
@@ -355,17 +373,3 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 
 export const selectChildEdges = (parentNodeId: string) => (state: TreeState) =>
   Array.from(state.edges.values()).filter((e) => e.fromNodeId === parentNodeId);
-
-export const selectPathToRoot = (nodeId: string) => (state: TreeState): string[] => {
-  const ids: string[] = [];
-  let cur = state.nodes.get(nodeId);
-  const seen = new Set<string>();
-  while (cur && cur.parentEdgeId && !seen.has(cur.id)) {
-    seen.add(cur.id);
-    ids.push(cur.id);
-    const edge = state.edges.get(cur.parentEdgeId);
-    if (!edge) break;
-    cur = state.nodes.get(edge.fromNodeId);
-  }
-  return ids.reverse();
-};

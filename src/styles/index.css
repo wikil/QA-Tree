@@ -220,3 +220,165 @@
     animation: qa-node-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 }
+
+/* Markdown editorial prose — Fraunces body + ember-rail accents */
+@layer components {
+  .qa-prose {
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 1.65;
+    color: hsl(var(--foreground) / 0.92);
+  }
+  .qa-prose > * + * {
+    margin-top: 0.85em;
+  }
+  .qa-prose h1,
+  .qa-prose h2,
+  .qa-prose h3,
+  .qa-prose h4 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    color: hsl(var(--foreground));
+    letter-spacing: -0.01em;
+    margin-top: 1.4em;
+    line-height: 1.25;
+  }
+  .qa-prose h1 { font-size: 24px; }
+  .qa-prose h2 { font-size: 20px; }
+  .qa-prose h3 { font-size: 17px; font-style: italic; }
+  .qa-prose h4 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-mono); font-weight: 600; }
+  .qa-prose h2::after,
+  .qa-prose h3::after {
+    content: '';
+    display: block;
+    width: 24px;
+    height: 1px;
+    background: hsl(var(--accent) / 0.5);
+    margin-top: 0.35em;
+  }
+  .qa-prose p {
+    margin: 0;
+  }
+  .qa-prose strong { font-weight: 600; color: hsl(var(--foreground)); }
+  .qa-prose em { font-style: italic; }
+  .qa-prose a {
+    color: hsl(var(--accent));
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+  .qa-prose a:hover {
+    text-decoration-thickness: 2px;
+  }
+  .qa-prose ul,
+  .qa-prose ol {
+    padding-left: 1.4em;
+  }
+  .qa-prose ul { list-style: none; }
+  .qa-prose ul > li { position: relative; }
+  .qa-prose ul > li::before {
+    content: '·';
+    position: absolute;
+    left: -1em;
+    color: hsl(var(--accent));
+    font-weight: 700;
+  }
+  .qa-prose ol { list-style-type: decimal; }
+  .qa-prose ol > li::marker { color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 0.85em; }
+  .qa-prose li { margin-top: 0.25em; }
+  .qa-prose blockquote {
+    border-left: 2px solid hsl(var(--accent) / 0.7);
+    padding-left: 1em;
+    font-style: italic;
+    color: hsl(var(--foreground) / 0.85);
+  }
+  .qa-prose hr {
+    border: none;
+    border-top: 1px solid hsl(var(--hairline) / 0.3);
+    margin: 1.6em 0;
+  }
+  .qa-prose code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: hsl(var(--secondary));
+    padding: 1px 5px;
+    border-radius: 2px;
+    color: hsl(var(--foreground));
+  }
+  .qa-prose pre {
+    background: hsl(var(--secondary) / 0.7);
+    border-left: 1px solid hsl(var(--accent) / 0.5);
+    padding: 0.85em 1em;
+    border-radius: 2px;
+    overflow-x: auto;
+    font-size: 13px;
+  }
+  .qa-prose pre code {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .qa-prose table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    font-family: var(--font-body);
+  }
+  .qa-prose th,
+  .qa-prose td {
+    border-bottom: 1px solid hsl(var(--hairline) / 0.25);
+    padding: 0.4em 0.6em;
+    text-align: left;
+  }
+  .qa-prose th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: hsl(var(--muted-foreground));
+    border-bottom-color: hsl(var(--hairline) / 0.5);
+  }
+  /* highlight.js minimal override — let parchment palette show through */
+  .qa-prose .hljs {
+    background: transparent !important;
+    color: hsl(var(--foreground) / 0.92) !important;
+  }
+  .qa-prose .hljs-comment,
+  .qa-prose .hljs-quote { color: hsl(var(--muted-foreground)); font-style: italic; }
+  .qa-prose .hljs-keyword,
+  .qa-prose .hljs-selector-tag,
+  .qa-prose .hljs-built_in { color: hsl(var(--accent)); font-weight: 600; }
+  .qa-prose .hljs-string,
+  .qa-prose .hljs-attr { color: hsl(36 55% 32%); }
+  .dark .qa-prose .hljs-string,
+  .dark .qa-prose .hljs-attr { color: hsl(36 60% 70%); }
+  .qa-prose .hljs-number,
+  .qa-prose .hljs-literal { color: hsl(22 65% 40%); }
+  .dark .qa-prose .hljs-number,
+  .dark .qa-prose .hljs-literal { color: hsl(24 75% 60%); }
+  .qa-prose .hljs-title,
+  .qa-prose .hljs-section,
+  .qa-prose .hljs-name { color: hsl(var(--foreground)); font-weight: 600; }
+  .qa-prose .hljs-variable,
+  .qa-prose .hljs-template-variable { color: hsl(var(--foreground) / 0.85); }
+
+  .qa-prose-prompt {
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.6;
+    font-style: italic;
+    color: hsl(var(--foreground) / 0.9);
+  }
+  .qa-prose-prompt::first-letter {
+    font-family: var(--font-display);
+    font-size: 2.4em;
+    line-height: 0.9;
+    float: left;
+    margin: 0.05em 0.08em 0 0;
+    color: hsl(var(--accent));
+    font-style: italic;
+    font-weight: 500;
+  }
+}

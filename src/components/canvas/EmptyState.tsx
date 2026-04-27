@@ -1,11 +1,9 @@
 import { useState, type KeyboardEvent } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-interface EmptyStateProps {
-  onSubmit?: (prompt: string) => void;
-  disabled?: boolean;
-}
+import { useTreeStore } from '@/stores/treeStore';
+import { useResolvedProvider } from '@/hooks/useResolvedProvider';
 
 const SAMPLES = [
   '什么是 transformer 的注意力机制？',
@@ -13,33 +11,49 @@ const SAMPLES = [
   '股息折现模型 vs 自由现金流估值？',
 ];
 
-export function EmptyState({ onSubmit, disabled }: EmptyStateProps) {
+export function EmptyState() {
   const [value, setValue] = useState('');
+  const { session, provider, proxy } = useResolvedProvider();
+  const sendPrompt = useTreeStore((s) => s.sendPrompt);
 
-  const submit = () => {
+  const noSession = !session;
+  const noProvider = !provider;
+  const disabled = noSession || noProvider;
+
+  const submit = async () => {
     const trimmed = value.trim();
-    if (!trimmed) return;
-    onSubmit?.(trimmed);
+    if (!trimmed || !session || !provider) return;
     setValue('');
+    try {
+      await sendPrompt({
+        parentNodeId: session.rootNodeId,
+        prompt: trimmed,
+        provider,
+        proxy,
+      });
+    } catch (e) {
+      setValue(trimmed);
+      // eslint-disable-next-line no-console
+      console.error('[EmptyState] sendPrompt failed:', e);
+    }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
-      submit();
+      void submit();
     }
   };
 
   return (
     <div className="relative flex h-full w-full items-center justify-center px-8">
-      {/* Decorative parchment rule */}
       <div className="pointer-events-none absolute inset-x-12 top-16 h-px bg-hairline/20" />
       <div className="pointer-events-none absolute inset-x-12 bottom-16 h-px bg-hairline/20" />
 
       <div className="relative w-full max-w-[640px]">
         <div className="mb-6 flex items-baseline gap-3">
           <span className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted-foreground">
-            Session · 00
+            {session ? `Session · ${session.title.slice(0, 20)}` : 'Session · 未创建'}
           </span>
           <span className="h-px flex-1 bg-hairline/30" />
           <span className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-muted-foreground">
@@ -57,14 +71,29 @@ export function EmptyState({ onSubmit, disabled }: EmptyStateProps) {
         </h1>
         <p className="mb-8 max-w-[480px] text-[14px] leading-[1.65] text-muted-foreground">
           每一次回答都是一个节点。沿任何节点继续追问，会长出新的分支；
-          兄弟分支彼此完全隔离。<span className="font-mono text-[12.5px] text-foreground/80">↵</span> 发送，<span className="font-mono text-[12.5px] text-foreground/80">⌘↵</span> 强制发送。
+          兄弟分支彼此完全隔离。
+          <span className="font-mono text-[12.5px] text-foreground/80">⌘↵</span> 发送。
         </p>
+
+        {noProvider && !noSession && (
+          <Link
+            to="/settings"
+            className={cn(
+              'mb-4 inline-flex items-center gap-1.5 rounded-[2px] border border-accent/60 px-3 py-1.5',
+              'font-mono text-[10.5px] uppercase tracking-[0.22em] text-accent',
+              'hover:bg-accent hover:text-accent-foreground',
+            )}
+          >
+            请先配置 Provider <ArrowUpRight className="h-3 w-3" />
+          </Link>
+        )}
 
         <div
           className={cn(
             'group relative flex items-end gap-3 rounded-[var(--radius)] border border-hairline/40 bg-card p-4',
             'qa-card-shadow focus-within:border-accent/60 focus-within:qa-card-shadow-active',
             'transition-shadow duration-200',
+            disabled && 'opacity-60',
           )}
         >
           <span className="absolute left-4 top-2 font-mono text-[9.5px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -75,18 +104,24 @@ export function EmptyState({ onSubmit, disabled }: EmptyStateProps) {
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={onKeyDown}
             disabled={disabled}
-            placeholder="在这里写下你想深入探索的问题…"
+            placeholder={
+              noSession
+                ? '请先创建一个 session…'
+                : noProvider
+                ? '请先配置 LLM provider…'
+                : '在这里写下你想深入探索的问题…'
+            }
             rows={3}
             className={cn(
               'min-h-[88px] w-full resize-none bg-transparent pt-5 text-[15.5px] leading-[1.55] text-foreground',
               'placeholder:font-display placeholder:italic placeholder:text-muted-foreground/60',
-              'focus:outline-none',
+              'focus:outline-none disabled:cursor-not-allowed',
             )}
             style={{ fontFamily: 'var(--font-display)', fontWeight: 400 }}
           />
           <button
             type="button"
-            onClick={submit}
+            onClick={() => void submit()}
             disabled={disabled || !value.trim()}
             className={cn(
               'flex shrink-0 items-center gap-1.5 rounded-[var(--radius)] px-3.5 py-2',
@@ -107,10 +142,12 @@ export function EmptyState({ onSubmit, disabled }: EmptyStateProps) {
               key={s}
               type="button"
               onClick={() => setValue(s)}
+              disabled={disabled}
               className={cn(
                 'rounded-full border border-hairline/30 bg-card/60 px-3 py-1.5',
                 'font-display text-[12.5px] italic text-muted-foreground',
                 'transition-colors hover:border-accent/50 hover:text-accent',
+                'disabled:opacity-50 disabled:hover:border-hairline/30 disabled:hover:text-muted-foreground',
               )}
             >
               “{s}”
