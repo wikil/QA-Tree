@@ -1,11 +1,9 @@
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import {
   AlertTriangle,
-  Check,
   ChevronDown,
   ChevronRight,
-  ListChecks,
   Pin,
   Plus,
   RefreshCw,
@@ -13,9 +11,10 @@ import {
   Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { fillTemplate, useI18n } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import { summarizeText, formatTokenUsage } from '@/lib/format';
 import { resolveStructuredErrorText } from './structuredErrorText';
+import { MAX_SUGGESTION_CHIPS } from './layout';
 import type { NodeStatus, QANode } from '@/types';
 
 export interface AnswerNodeData {
@@ -36,8 +35,6 @@ export interface AnswerNodeData {
   onRequestDelete?: (id: string) => void;
   /** Concept chip click — defers to AskBox so the user can refine the prompt. */
   onConceptChip?: (concept: string) => void;
-  /** Fork one or more sibling branches under this node using the given prompts. */
-  onForkPrompts?: (parentNodeId: string, prompts: string[]) => void;
   [key: string]: unknown;
 }
 
@@ -69,7 +66,6 @@ function AnswerNodeComponent({ data }: NodeProps) {
     onExpand,
     onRequestDelete,
     onConceptChip,
-    onForkPrompts,
   } = data as AnswerNodeData;
 
   const status = node.status;
@@ -82,9 +78,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
   const summaryText = structured?.summary?.trim() || summarizeText(node.content, 220, 'firstBlock');
   const tokens = formatTokenUsage(node.tokenUsage);
   const concepts = structured?.concepts ?? [];
-  const suggestions = structured?.suggestedQuestions ?? [];
   const hasConcepts = concepts.length > 0;
-  const hasSuggestions = suggestions.length > 0;
   const structuredErrorText = resolveStructuredErrorText(node.structuredError, t.answer);
 
   return (
@@ -214,7 +208,14 @@ function AnswerNodeComponent({ data }: NodeProps) {
         </div>
       )}
 
-      {/* Body — title + summary preview, faded at bottom */}
+      {hasConcepts && (
+        <ConceptStrip
+          concepts={concepts}
+          disabled={isForkDisabled || !onConceptChip}
+          onPick={(c) => onConceptChip?.(c)}
+        />
+      )}
+
       <div className="relative flex-1 overflow-hidden">
         <div
           className={cn(
@@ -242,23 +243,6 @@ function AnswerNodeComponent({ data }: NodeProps) {
           </div>
         </div>
       </div>
-
-      {hasConcepts && (
-        <ConceptStrip
-          concepts={concepts}
-          disabled={isForkDisabled || !onConceptChip}
-          onPick={(c) => onConceptChip?.(c)}
-        />
-      )}
-
-      {hasSuggestions && (
-        <SuggestedStrip
-          suggestions={suggestions}
-          disabled={isForkDisabled}
-          onForkOne={(prompt) => onForkPrompts?.(node.id, [prompt])}
-          onForkMany={(prompts) => onForkPrompts?.(node.id, prompts)}
-        />
-      )}
 
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-border/60 px-3 py-1.5">
@@ -339,7 +323,7 @@ function ConceptStrip({
       >
         {t.answer.conceptsHeading} ·
       </span>
-      {concepts.slice(0, 6).map((c) => (
+      {concepts.slice(0, MAX_SUGGESTION_CHIPS).map((c) => (
         <button
           key={c}
           type="button"
@@ -363,160 +347,93 @@ function ConceptStrip({
   );
 }
 
-function SuggestedStrip({
-  suggestions,
-  disabled,
-  onForkOne,
-  onForkMany,
-}: {
+export interface SuggestedRailData {
   suggestions: string[];
   disabled: boolean;
-  onForkOne: (prompt: string) => void;
-  onForkMany: (prompts: string[]) => void;
+  onPick?: (prompt: string) => void;
+  [key: string]: unknown;
+}
+
+export function SuggestionChip({
+  text,
+  disabled,
+  dense,
+  onPick,
+}: {
+  text: string;
+  disabled?: boolean;
+  /** Single-line truncated variant (AskBox); default is multi-line wrap (rail). */
+  dense?: boolean;
+  onPick: () => void;
 }) {
-  const { t } = useI18n();
-  // null = single-click mode; Set = multi-select mode (entries are picked).
-  // Single state keeps mode + selection in lockstep — no desync risk.
-  const [selection, setSelection] = useState<Set<string> | null>(null);
-  const multi = selection != null;
-  const pickedSize = selection?.size ?? 0;
-
-  const toggle = (q: string) => {
-    setSelection((prev) => {
-      if (!prev) return prev;
-      const next = new Set(prev);
-      if (next.has(q)) next.delete(q);
-      else next.add(q);
-      return next;
-    });
-  };
-
-  const submit = () => {
-    if (!selection || selection.size === 0) return;
-    // Preserve the model's ordering rather than Set insertion order so paths
-    // feel intentional.
-    const ordered = suggestions.filter((q) => selection.has(q));
-    onForkMany(ordered);
-    setSelection(null);
-  };
-
   return (
-    <div
-      className="flex flex-col gap-1 border-t border-accent/25 bg-accent/[0.04] px-3 pb-1.5 pt-1.5"
-      onClick={(e) => e.stopPropagation()}
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (disabled) return;
+        onPick();
+      }}
+      title={text}
+      className={cn(
+        'group/chip flex shrink-0 gap-1.5 rounded-[3px] border border-accent/35 px-2',
+        'font-display text-[11.5px] italic leading-snug text-foreground transition-colors',
+        'hover:enabled:border-accent hover:enabled:bg-accent/10',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        dense
+          ? 'max-w-[260px] items-center py-0.5'
+          : 'max-w-[200px] items-start bg-card/95 py-1 text-left qa-card-shadow',
+      )}
     >
-      <div className="flex items-center gap-1.5">
+      <span
+        aria-hidden
+        className={cn(
+          'inline-block h-1 w-1 shrink-0 rounded-full bg-accent/70 group-hover/chip:bg-accent',
+          !dense && 'mt-[3px]',
+        )}
+      />
+      <span className={dense ? 'truncate' : 'line-clamp-2 break-words'}>{text}</span>
+    </button>
+  );
+}
+
+function SuggestedRailComponent({ data }: NodeProps) {
+  const { t } = useI18n();
+  const { suggestions, disabled, onPick } = data as SuggestedRailData;
+  if (suggestions.length === 0) return null;
+  return (
+    <div onClick={(e) => e.stopPropagation()} className="flex flex-col gap-1 select-none">
+      <div className="flex items-center gap-1.5 px-1">
         <Sparkles className="h-3 w-3 text-accent" />
         <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-accent">
           {t.answer.suggestedHeading}
         </span>
-        <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground/60">
-          · {multi ? `${pickedSize}/${suggestions.length}` : t.answer.suggestedSingleHint}
-        </span>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setSelection(multi ? null : new Set());
-          }}
-          className={cn(
-            'ml-auto flex items-center gap-1 rounded-[2px] border px-1.5 py-px',
-            'font-mono text-[9.5px] uppercase tracking-[0.16em] transition-colors',
-            multi
-              ? 'border-accent bg-accent text-accent-foreground'
-              : 'border-hairline/50 text-muted-foreground hover:border-accent/60 hover:text-accent',
-          )}
-        >
-          <ListChecks className="h-2.5 w-2.5" />
-          {multi ? t.answer.suggestedExitMulti : t.answer.suggestedMultiSelect}
-        </button>
       </div>
-      <div className="flex flex-wrap items-center gap-1">
-        {suggestions.slice(0, 6).map((q) => {
-          const active = selection?.has(q) ?? false;
-          return (
-            <button
-              key={q}
-              type="button"
-              disabled={disabled}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (disabled) return;
-                if (multi) toggle(q);
-                else onForkOne(q);
-              }}
-              className={cn(
-                'flex items-center gap-1 rounded-[3px] border px-1.5 py-0.5',
-                'font-display text-[11.5px] italic leading-tight text-foreground',
-                'transition-colors',
-                multi && active
-                  ? 'border-accent bg-accent/15 text-foreground'
-                  : 'border-accent/35 bg-card hover:enabled:border-accent hover:enabled:bg-accent/10',
-                'disabled:cursor-not-allowed disabled:opacity-40',
-              )}
-              title={q}
-            >
-              {multi && (
-                <span
-                  className={cn(
-                    'grid h-3 w-3 place-items-center rounded-[1px] border',
-                    active
-                      ? 'border-accent bg-accent text-accent-foreground'
-                      : 'border-hairline/60 bg-background',
-                  )}
-                >
-                  {active && <Check className="h-2 w-2" />}
-                </span>
-              )}
-              <span className="max-w-[180px] truncate">{q}</span>
-            </button>
-          );
-        })}
+      <div className="flex flex-col gap-1.5">
+        {suggestions.slice(0, MAX_SUGGESTION_CHIPS).map((q) => (
+          <SuggestionChip
+            key={q}
+            text={q}
+            disabled={disabled}
+            onPick={() => onPick?.(q)}
+          />
+        ))}
       </div>
-      {multi && (
-        <div className="flex items-center gap-1.5 pt-0.5">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelection(new Set(suggestions));
-            }}
-            className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground"
-          >
-            {t.answer.suggestedSelectAll}
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelection(new Set());
-            }}
-            className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground"
-          >
-            {t.answer.suggestedSelectClear}
-          </button>
-          <button
-            type="button"
-            disabled={disabled || pickedSize === 0}
-            onClick={(e) => {
-              e.stopPropagation();
-              submit();
-            }}
-            title={pickedSize === 0 ? t.answer.suggestedBatchEmpty : undefined}
-            className={cn(
-              'ml-auto flex items-center gap-1 rounded-[2px] border px-2 py-px',
-              'font-mono text-[9.5px] uppercase tracking-[0.18em] transition-colors',
-              'border-accent/60 text-accent hover:enabled:bg-accent hover:enabled:text-accent-foreground',
-              'disabled:cursor-not-allowed disabled:opacity-40',
-            )}
-          >
-            {fillTemplate(t.answer.suggestedBatchSubmit, { n: pickedSize })}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
+
+function suggestedRailPropsEqual(prev: Readonly<NodeProps>, next: Readonly<NodeProps>): boolean {
+  if (prev.id !== next.id) return false;
+  const a = prev.data as SuggestedRailData;
+  const b = next.data as SuggestedRailData;
+  // onPick identity skipped — closures from the parent memo are recreated each
+  // pass even though the user-visible behavior is stable.
+  return a.suggestions === b.suggestions && a.disabled === b.disabled;
+}
+
+export const SuggestedRail = memo(SuggestedRailComponent, suggestedRailPropsEqual);
 
 function answerNodePropsEqual(
   prev: Readonly<NodeProps>,

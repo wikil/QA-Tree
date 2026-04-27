@@ -1,8 +1,10 @@
 import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowUpRight, CornerDownLeft, X } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, CornerDownLeft, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SuggestionChip } from './AnswerNode';
+import { MAX_SUGGESTION_CHIPS } from './layout';
 import { useTreeStore } from '@/stores/treeStore';
 import { useSessionsStore } from '@/stores/sessionsStore';
 import { useResolvedProvider } from '@/hooks/useResolvedProvider';
@@ -131,6 +133,20 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
     }
   };
 
+  const selectedNode = selectedNodeId ? nodes.get(selectedNodeId) : undefined;
+  const suggestions = selectedNode?.structured?.suggestedQuestions;
+
+  const forkSuggestion = async (prompt: string) => {
+    const trimmed = prompt.trim();
+    if (!trimmed || !provider || !parentNodeId) return;
+    try {
+      await sendPrompt({ parentNodeId, prompt: trimmed, provider, proxy });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[AskBox] suggestion fork failed:', e);
+    }
+  };
+
   const onKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
@@ -193,6 +209,23 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
           <span className="truncate">↳ {banner.label}</span>
         )}
       </div>
+
+      {suggestions && suggestions.length > 0 && !disabled && (
+        <div className="flex flex-wrap items-center gap-1.5 px-6 pb-1 pt-1.5">
+          <span className="flex shrink-0 items-center gap-1 font-mono text-[9.5px] uppercase tracking-[0.18em] text-accent">
+            <Sparkles className="h-3 w-3" />
+            {t.answer.suggestedHeading}
+          </span>
+          {suggestions.slice(0, MAX_SUGGESTION_CHIPS).map((q) => (
+            <SuggestionChip
+              key={q}
+              text={q}
+              dense
+              onPick={() => void forkSuggestion(q)}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="flex items-end gap-3 px-6 pb-3 pt-1">
         <span className="select-none pb-2 font-mono text-[10.5px] uppercase tracking-[0.18em] text-accent">

@@ -16,7 +16,12 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { AnswerNode, type AnswerNodeData } from './AnswerNode';
+import {
+  AnswerNode,
+  SuggestedRail,
+  type AnswerNodeData,
+  type SuggestedRailData,
+} from './AnswerNode';
 import { PromptEdge, type PromptEdgeData } from './PromptEdge';
 import { StartPill } from './StartPill';
 import { CanvasToolbar } from './CanvasToolbar';
@@ -28,6 +33,10 @@ import {
   NODE_HEIGHT,
   NODE_WIDTH,
   START_NODE_ID,
+  SUGGESTED_RAIL_GAP,
+  SUGGESTED_RAIL_NODE_TYPE,
+  SUGGESTED_RAIL_WIDTH,
+  suggestedRailHeight,
 } from './layout';
 import { pathHighlight, EMPTY_HIGHLIGHT } from './pathHighlight';
 import { useTreeStore } from '@/stores/treeStore';
@@ -40,6 +49,7 @@ import type { QANode } from '@/types';
 const nodeTypes = {
   answer: AnswerNode,
   start: StartPill,
+  [SUGGESTED_RAIL_NODE_TYPE]: SuggestedRail,
 };
 
 const edgeTypes = {
@@ -167,18 +177,17 @@ function TreeCanvasInner({ onAddBranchFocus, onPrefillAsk }: TreeCanvasProps) {
     [requestDeleteSubtree],
   );
 
-  const handleForkPrompts = useCallback(
-    async (parentNodeId: string, prompts: string[]) => {
+  const handleForkOne = useCallback(
+    async (parentNodeId: string, prompt: string) => {
       if (!provider) return;
-      const trimmed = prompts.map((p) => p.trim()).filter(Boolean);
-      await Promise.all(
-        trimmed.map((prompt) =>
-          sendPrompt({ parentNodeId, prompt, provider, proxy }).catch((e) => {
-            // eslint-disable-next-line no-console
-            console.error('[TreeCanvas] fork sendPrompt failed:', e);
-          }),
-        ),
-      );
+      const trimmed = prompt.trim();
+      if (!trimmed) return;
+      try {
+        await sendPrompt({ parentNodeId, prompt: trimmed, provider, proxy });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[TreeCanvas] fork sendPrompt failed:', e);
+      }
     },
     [provider, proxy, sendPrompt],
   );
@@ -228,7 +237,6 @@ function TreeCanvasInner({ onAddBranchFocus, onPrefillAsk }: TreeCanvasProps) {
         onExpand: handleExpand,
         onRequestDelete: handleRequestDelete,
         onConceptChip: handleConceptChip,
-        onForkPrompts: handleForkPrompts,
       };
       rfNodes.push({
         id: pn.id,
@@ -239,6 +247,31 @@ function TreeCanvasInner({ onAddBranchFocus, onPrefillAsk }: TreeCanvasProps) {
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
       });
+
+      // Rails are leaf-only so they never overlap descendant nodes/edges.
+      const suggestions = node.structured?.suggestedQuestions;
+      if (childCount === 0 && suggestions && suggestions.length > 0) {
+        const railHeight = suggestedRailHeight(suggestions.length);
+        const railData: SuggestedRailData = {
+          suggestions,
+          disabled: forkUnavailable || streamingNodeIds.has(pn.id),
+          onPick: (prompt) => handleForkOne(pn.id, prompt),
+        };
+        rfNodes.push({
+          id: `${pn.id}__rail`,
+          type: SUGGESTED_RAIL_NODE_TYPE,
+          position: {
+            x: pn.x + NODE_WIDTH + SUGGESTED_RAIL_GAP,
+            y: pn.y + Math.max(0, (NODE_HEIGHT - railHeight) / 2),
+          },
+          data: railData as unknown as Record<string, unknown>,
+          draggable: false,
+          selectable: false,
+          focusable: false,
+          width: SUGGESTED_RAIL_WIDTH,
+          height: railHeight,
+        });
+      }
     }
     return rfNodes;
   }, [
@@ -257,7 +290,7 @@ function TreeCanvasInner({ onAddBranchFocus, onPrefillAsk }: TreeCanvasProps) {
     handleExpand,
     handleRequestDelete,
     handleConceptChip,
-    handleForkPrompts,
+    handleForkOne,
     forkUnavailable,
   ]);
 
@@ -294,6 +327,7 @@ function TreeCanvasInner({ onAddBranchFocus, onPrefillAsk }: TreeCanvasProps) {
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
       if (node.id === START_NODE_ID) return;
+      if (node.type === SUGGESTED_RAIL_NODE_TYPE) return;
       selectNode(node.id);
     },
     [selectNode],
@@ -405,11 +439,11 @@ function TreeCanvasInner({ onAddBranchFocus, onPrefillAsk }: TreeCanvasProps) {
               zoomable
               position="bottom-right"
               maskColor="hsl(var(--background) / 0.7)"
-              nodeColor={(n) =>
-                n.type === 'start'
-                  ? 'hsl(var(--accent))'
-                  : 'hsl(var(--foreground) / 0.45)'
-              }
+              nodeColor={(n) => {
+                if (n.type === 'start') return 'hsl(var(--accent))';
+                if (n.type === SUGGESTED_RAIL_NODE_TYPE) return 'transparent';
+                return 'hsl(var(--foreground) / 0.45)';
+              }}
               nodeStrokeColor="transparent"
               nodeBorderRadius={2}
               style={{ width: 148, height: 96 }}

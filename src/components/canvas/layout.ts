@@ -11,6 +11,16 @@ export const RANK_SEP = 220;
 export const NODE_SEP = 64;
 export const EDGE_SEP = 28;
 
+export const SUGGESTED_RAIL_NODE_TYPE = 'suggestedRail';
+export const SUGGESTED_RAIL_WIDTH = 196;
+export const SUGGESTED_RAIL_GAP = 16;
+export const MAX_SUGGESTION_CHIPS = 6;
+const RAIL_HEADER_HEIGHT = 18;
+const RAIL_CHIP_HEIGHT = 38;
+export function suggestedRailHeight(count: number): number {
+  return RAIL_HEADER_HEIGHT + Math.min(count, MAX_SUGGESTION_CHIPS) * RAIL_CHIP_HEIGHT;
+}
+
 export interface PositionedNode {
   id: string;
   x: number;
