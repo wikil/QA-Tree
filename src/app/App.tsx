@@ -50,14 +50,33 @@ export default function App() {
     focusAskBox();
   }, [createSession, focusAskBox]);
 
-  // ⌘N / Ctrl+N to create a new session
+  // ⌘N / Ctrl+N → new session.  Esc → clear canvas selection (only when no
+  // input is focused, so SessionRow rename / AskBox / settings forms can keep
+  // using Esc for their own cancel semantics).
   useEffect(() => {
+    const isEditableTarget = (el: EventTarget | null) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      return (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        el.isContentEditable
+      );
+    };
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
-        // Avoid hijacking native new-window in browsers that allow it (most don't intercept Cmd+N anyway)
         if (e.shiftKey || e.altKey) return;
         e.preventDefault();
         void handleNewSession();
+        return;
+      }
+      if (e.key === 'Escape' && !isEditableTarget(e.target)) {
+        const tree = useTreeStore.getState();
+        if (tree.selectedNodeId != null || tree.selectedEdgeId != null) {
+          e.preventDefault();
+          tree.selectNode(null);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
