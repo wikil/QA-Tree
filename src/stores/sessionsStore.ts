@@ -1,8 +1,22 @@
 import { create } from 'zustand';
 import { db, KV_KEYS } from '@/lib/db';
 import { newId } from '@/lib/ids';
+import { generateSessionTitle } from '@/lib/sessionTitle';
 import { discardStreamsForSession } from '@/stores/treeStore';
-import type { QANode, Session } from '@/types';
+import type {
+  ProviderConfig,
+  ProxyConfig,
+  QANode,
+  Session,
+  SessionTitleSource,
+} from '@/types';
+
+interface AutoTitleOptions {
+  provider: ProviderConfig;
+  proxy: ProxyConfig;
+  prompt: string;
+  answer: string;
+}
 
 interface SessionsState {
   hydrated: boolean;
@@ -14,6 +28,7 @@ interface SessionsState {
   renameSession: (id: string, title: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   recordFirstPrompt: (id: string, prompt: string) => Promise<void>;
+  autoTitleSession: (id: string, opts: AutoTitleOptions) => Promise<void>;
   setCurrentSessionId: (id: string | null) => Promise<void>;
   touchSession: (id: string) => Promise<void>;
   setSessionProvider: (id: string, providerId: string | undefined) => Promise<void>;
@@ -23,6 +38,7 @@ const DEFAULT_SESSION_TITLE = '新会话';
 const sortByUpdatedDesc = (a: Session, b: Session) => b.updatedAt - a.updatedAt;
 
 let hydratePromise: Promise<void> | null = null;
+const autoTitleInflight = new Set<string>();
 
 const COLLAPSED_KV_KEY = KV_KEYS.collapsedSubtrees;
 
@@ -38,6 +54,17 @@ async function clearCollapsedForSession(sessionId: string) {
 function makeTitleFromPrompt(prompt: string): string {
   const title = prompt.trim().replace(/\s+/g, ' ');
   return title.length > 36 ? `${title.slice(0, 36)}...` : title;
+}
+
+function isAutoTitleSource(source: SessionTitleSource | undefined): boolean {
+  return source === 'default' || source === 'prompt';
+}
+
+function normalizeSession(session: Session): Session {
+  return {
+    ...session,
+    titleSource: session.titleSource ?? 'prompt',
+  };
 }
 
 export const useSessionsStore = create<SessionsState>((set, get) => ({
@@ -60,11 +87,12 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
           firstPromptBySession.set(edge.sessionId, edge.prompt);
         }
       }
-      const hydratedSessions = sessions.map((session) =>
-        session.firstPrompt
-          ? session
-          : { ...session, firstPrompt: firstPromptBySession.get(session.id) },
-      );
+      const hydratedSessions = sessions.map((session) => {
+        const normalized = normalizeSession(session);
+        return normalized.firstPrompt
+          ? normalized
+          : { ...normalized, firstPrompt: firstPromptBySession.get(normalized.id) };
+      });
       hydratedSessions.sort(sortByUpdatedDesc);
       const persisted = (currentRecord?.value as string | null | undefined) ?? null;
       const stillExists = persisted && hydratedSessions.some((s) => s.id === persisted);
@@ -93,6 +121,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     const session: Session = {
       id: sessionId,
       title: title?.trim() || DEFAULT_SESSION_TITLE,
+      titleSource: 'default',
       createdAt: now,
       updatedAt: now,
       rootNodeId,
@@ -111,11 +140,18 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   renameSession: async (id, title) => {
     const trimmed = title.trim() || '未命名会话';
     const now = Date.now();
-    await db.sessions.update(id, { title: trimmed, updatedAt: now });
+    const titleSource: SessionTitleSource = 'manual';
+    await db.sessions.update(id, {
+      title: trimmed,
+      titleSource,
+      updatedAt: now,
+    });
     set((s) => ({
       sessions: s.sessions
         .map((sess) =>
-          sess.id === id ? { ...sess, title: trimmed, updatedAt: now } : sess,
+          sess.id === id
+            ? { ...sess, title: trimmed, titleSource, updatedAt: now }
+            : sess,
         )
         .sort(sortByUpdatedDesc),
     }));
@@ -145,15 +181,70 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     const now = Date.now();
     const existing = get().sessions.find((s) => s.id === id);
     const firstPrompt = existing?.firstPrompt ?? trimmedPrompt;
+    const source = existing?.titleSource ?? 'prompt';
     const shouldAutoTitle =
-      !existing || existing.title.trim() === '' || existing.title === DEFAULT_SESSION_TITLE;
-    const title = shouldAutoTitle ? makeTitleFromPrompt(trimmedPrompt) : existing.title;
+      source === 'default' ||
+      (!existing || existing.title.trim() === '' || existing.title === DEFAULT_SESSION_TITLE);
+    const title = shouldAutoTitle
+      ? makeTitleFromPrompt(trimmedPrompt)
+      : (existing?.title ?? DEFAULT_SESSION_TITLE);
+    const titleSource: SessionTitleSource = isAutoTitleSource(source)
+      ? 'prompt'
+      : source;
 
-    await db.sessions.update(id, { firstPrompt, title, updatedAt: now });
+    await db.sessions.update(id, { firstPrompt, title, titleSource, updatedAt: now });
     set((s) => ({
       sessions: s.sessions
         .map((sess) =>
-          sess.id === id ? { ...sess, firstPrompt, title, updatedAt: now } : sess,
+          sess.id === id
+            ? { ...sess, firstPrompt, title, titleSource, updatedAt: now }
+            : sess,
+        )
+        .sort(sortByUpdatedDesc),
+    }));
+  },
+
+  autoTitleSession: async (id, opts) => {
+    const session = get().sessions.find((s) => s.id === id);
+    if (!session || !isAutoTitleSource(session.titleSource)) return;
+    if (autoTitleInflight.has(id)) return;
+
+    const prompt = opts.prompt.trim();
+    const answer = opts.answer.trim();
+    if (!prompt || !answer) return;
+
+    let title = '';
+    autoTitleInflight.add(id);
+    try {
+      title = await generateSessionTitle({
+        provider: opts.provider,
+        proxy: opts.proxy,
+        prompt,
+        answer,
+      });
+    } catch {
+      return;
+    } finally {
+      autoTitleInflight.delete(id);
+    }
+    if (!title) return;
+
+    const latest = await db.sessions.get(id);
+    if (!latest || !isAutoTitleSource(latest.titleSource ?? 'prompt')) return;
+
+    const now = Date.now();
+    const titleSource: SessionTitleSource = 'llm';
+    await db.sessions.update(id, {
+      title,
+      titleSource,
+      updatedAt: now,
+    });
+    set((s) => ({
+      sessions: s.sessions
+        .map((sess) =>
+          sess.id === id
+            ? { ...sess, title, titleSource, updatedAt: now }
+            : sess,
         )
         .sort(sortByUpdatedDesc),
     }));

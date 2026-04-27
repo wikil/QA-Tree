@@ -1,10 +1,12 @@
 export type NodeStatus = 'streaming' | 'done' | 'aborted' | 'error';
 export type FinishReason = 'stop' | 'length' | 'abort' | 'error';
 export type Locale = 'zh' | 'en';
+export type SessionTitleSource = 'default' | 'prompt' | 'llm' | 'manual';
 
 export interface Session {
   id: string;
   title: string;
+  titleSource: SessionTitleSource;
   firstPrompt?: string;
   createdAt: number;
   updatedAt: number;

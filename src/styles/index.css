@@ -320,6 +320,25 @@
     font-size: 13px;
     line-height: 1.55;
   }
+  .qa-prose .qa-mermaid {
+    background: hsl(var(--secondary) / 0.55);
+    border-left: 1px solid hsl(var(--accent) / 0.5);
+    border-radius: 2px;
+    overflow-x: auto;
+    padding: 0.85em 1em;
+  }
+  .qa-prose .qa-mermaid svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+  }
+  .qa-prose .qa-mermaid-loading {
+    min-height: 120px;
+  }
+  .qa-prose .qa-mermaid-fallback {
+    border-left-color: hsl(var(--destructive) / 0.55);
+  }
   .qa-prose table {
     width: 100%;
     border-collapse: collapse;

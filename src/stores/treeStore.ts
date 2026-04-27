@@ -290,9 +290,27 @@ async function runStream(args: {
     }
   } finally {
     if (isCurrentRecord(rec)) {
+      const autoTitleSession = useSessionsStore.getState().sessions.find(
+        (session) => session.id === sessionId && session.rootNodeId === parentNodeId,
+      );
+      const shouldAutoTitle =
+        rec.node.status === 'done' &&
+        (autoTitleSession?.titleSource === 'default' ||
+          autoTitleSession?.titleSource === 'prompt');
+      const titleAnswer = rec.node.content;
       await flushRecord(rec);
       streamRecords.delete(nodeId);
       syncStreamingState();
+      if (shouldAutoTitle) {
+        void useSessionsStore
+          .getState()
+          .autoTitleSession(sessionId, {
+            provider,
+            proxy,
+            prompt: promptForContext,
+            answer: titleAnswer,
+          });
+      }
     }
   }
 }

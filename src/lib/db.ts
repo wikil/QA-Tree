@@ -1,6 +1,9 @@
 import Dexie, { type Table } from 'dexie';
 import type { ProviderConfig, QAEdge, QANode, Session } from '@/types';
 
+type LegacySession = Omit<Session, 'titleSource'> &
+  Partial<Pick<Session, 'titleSource'>>;
+
 export interface KVRecord<T = unknown> {
   key: string;
   value: T;
@@ -22,6 +25,22 @@ export class QATreeDB extends Dexie {
       providers: 'id',
       kv: 'key',
     });
+    this.version(2)
+      .stores({
+        sessions: 'id, updatedAt',
+        nodes: 'id, sessionId, parentEdgeId',
+        edges: 'id, sessionId, fromNodeId, toNodeId',
+        providers: 'id',
+        kv: 'key',
+      })
+      .upgrade((tx) =>
+        tx
+          .table<LegacySession, string>('sessions')
+          .toCollection()
+          .modify((session) => {
+            session.titleSource ??= 'prompt';
+          }),
+      );
   }
 }
 

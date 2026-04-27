@@ -25,6 +25,23 @@ export interface StreamChatResult {
   usage?: { prompt: number; completion: number };
 }
 
+export interface CompleteChatOptions {
+  provider: ProviderConfig;
+  proxy?: ProxyConfig;
+  messages: ChatMessage[];
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
+export interface CompleteChatResult {
+  content: string;
+  finishReason: FinishReason;
+  model?: string;
+  usage?: { prompt: number; completion: number };
+}
+
 export class LLMError extends Error {
   status?: number;
   constructor(message: string, status?: number, options?: ErrorOptions) {
@@ -43,30 +60,72 @@ interface OpenAIStreamChunk {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
+interface OpenAICompleteResponse {
+  model?: string;
+  choices?: Array<{
+    message?: { content?: string };
+    finish_reason?: string | null;
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+
 const stripTrailingSlash = (s: string) => s.replace(/\/+$/, '');
 
-export async function streamChat(opts: StreamChatOptions): Promise<StreamChatResult> {
-  const { provider, proxy, messages, signal, onDelta } = opts;
+function buildRequestTarget(
+  provider: ProviderConfig,
+  proxy: ProxyConfig | undefined,
+  accept: string,
+) {
   const upstreamUrl = `${stripTrailingSlash(provider.baseUrl)}/chat/completions`;
   const useProxy = proxy?.enabled === true && !!proxy.url;
   const url = useProxy ? `${stripTrailingSlash(proxy!.url)}/forward` : upstreamUrl;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    Accept: 'text/event-stream',
+    Accept: accept,
   };
   if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
   if (useProxy) headers['X-Upstream-URL'] = upstreamUrl;
 
+  return { url, headers };
+}
+
+function buildBaseBody(opts: {
+  provider: ProviderConfig;
+  messages: ChatMessage[];
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  stream: boolean;
+}): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    model: opts.model ?? provider.defaultModel,
-    messages,
-    stream: true,
+    model: opts.model ?? opts.provider.defaultModel,
+    messages: opts.messages,
+    stream: opts.stream,
   };
-  const temperature = opts.temperature ?? provider.temperature;
+  const temperature = opts.temperature ?? opts.provider.temperature;
   if (temperature !== undefined) body.temperature = temperature;
-  const maxTokens = opts.maxTokens ?? provider.maxTokens;
+  const maxTokens = opts.maxTokens ?? opts.provider.maxTokens;
   if (maxTokens !== undefined) body.max_tokens = maxTokens;
+  return body;
+}
+
+function normalizeFinishReason(value: string | null | undefined): FinishReason {
+  if (value === 'length' || value === 'abort' || value === 'error') return value;
+  return 'stop';
+}
+
+export async function streamChat(opts: StreamChatOptions): Promise<StreamChatResult> {
+  const { provider, proxy, messages, signal, onDelta } = opts;
+  const { url, headers } = buildRequestTarget(provider, proxy, 'text/event-stream');
+  const body = buildBaseBody({
+    provider,
+    messages,
+    model: opts.model,
+    temperature: opts.temperature,
+    maxTokens: opts.maxTokens,
+    stream: true,
+  });
 
   let response: Response;
   try {
@@ -160,4 +219,61 @@ export async function streamChat(opts: StreamChatOptions): Promise<StreamChatRes
   }
 
   return { content, finishReason, model, usage };
+}
+
+export async function completeChat(
+  opts: CompleteChatOptions,
+): Promise<CompleteChatResult> {
+  const { provider, proxy, messages, signal } = opts;
+  const { url, headers } = buildRequestTarget(provider, proxy, 'application/json');
+  const body = buildBaseBody({
+    provider,
+    messages,
+    model: opts.model,
+    temperature: opts.temperature,
+    maxTokens: opts.maxTokens,
+    stream: false,
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    if (signal?.aborted) return { content: '', finishReason: 'abort' };
+    throw new LLMError(`请求失败：${(e as Error).message}`, undefined, { cause: e });
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    const detail = text ? ` — ${text.slice(0, 400)}` : '';
+    throw new LLMError(`${response.status} ${response.statusText}${detail}`, response.status);
+  }
+
+  let parsed: OpenAICompleteResponse;
+  try {
+    parsed = (await response.json()) as OpenAICompleteResponse;
+  } catch (e) {
+    throw new LLMError(`响应 JSON 解析失败：${(e as Error).message}`, undefined, {
+      cause: e,
+    });
+  }
+
+  const choice = parsed.choices?.[0];
+  const usage = parsed.usage
+    ? {
+        prompt: parsed.usage.prompt_tokens ?? 0,
+        completion: parsed.usage.completion_tokens ?? 0,
+      }
+    : undefined;
+  return {
+    content: choice?.message?.content ?? '',
+    finishReason: normalizeFinishReason(choice?.finish_reason),
+    model: parsed.model ?? (body.model as string),
+    usage,
+  };
 }
