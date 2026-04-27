@@ -4,9 +4,9 @@ import { Settings, Plus, Search } from 'lucide-react';
 import { TreeCanvas } from '@/components/canvas/TreeCanvas';
 import { DetailPanel } from '@/components/canvas/DetailPanel';
 import { AskBox, type AskBoxHandle } from '@/components/canvas/AskBox';
+import { SessionRow } from '@/components/sidebar/SessionRow';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { formatRelativeTime } from '@/lib/format';
 import { useSessionsStore } from '@/stores/sessionsStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useTreeStore } from '@/stores/treeStore';
@@ -153,35 +153,14 @@ export default function App() {
           ) : (
             filteredSessions.map((s) => {
               const isCurrent = s.id === currentSessionId;
-              const nodeCount = isCurrent ? treeNodeCount : undefined;
               return (
-                <button
+                <SessionRow
                   key={s.id}
-                  type="button"
-                  onClick={() => void setCurrentSessionId(s.id)}
-                  className={cn(
-                    'group/item flex w-full flex-col items-start gap-1 border-l-2 px-3.5 py-2.5 text-left transition-colors',
-                    isCurrent
-                      ? 'border-accent bg-accent/5'
-                      : 'border-transparent hover:border-hairline/40 hover:bg-card/60',
-                  )}
-                >
-                  <span
-                    className="font-display text-[14.5px] leading-tight text-foreground"
-                    style={{ fontFeatureSettings: '"ss01"' }}
-                  >
-                    {s.title}
-                  </span>
-                  <span className="flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
-                    {nodeCount !== undefined && (
-                      <>
-                        <span>{Math.max(0, nodeCount - 1)} nodes</span>
-                        <span className="text-muted-foreground/40">·</span>
-                      </>
-                    )}
-                    <span>{formatRelativeTime(s.updatedAt)}</span>
-                  </span>
-                </button>
+                  session={s}
+                  isCurrent={isCurrent}
+                  nodeCount={isCurrent ? treeNodeCount : undefined}
+                  onSelect={() => void setCurrentSessionId(s.id)}
+                />
               );
             })
           )}
