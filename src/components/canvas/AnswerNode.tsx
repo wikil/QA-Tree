@@ -1,17 +1,21 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronRight,
+  ListChecks,
   Pin,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useI18n } from '@/lib/i18n';
+import { fillTemplate, useI18n } from '@/lib/i18n';
 import { summarizeText, formatTokenUsage } from '@/lib/format';
+import { resolveStructuredErrorText } from './structuredErrorText';
 import type { NodeStatus, QANode } from '@/types';
 
 export interface AnswerNodeData {
@@ -24,11 +28,16 @@ export interface AnswerNodeData {
   isRetryDisabled: boolean;
   isDeleteDisabled: boolean;
   isPinned: boolean;
+  isForkDisabled: boolean;
   onToggleCollapse?: (id: string) => void;
   onAddBranch?: (id: string) => void;
   onRetry?: (id: string) => void;
   onExpand?: (id: string) => void;
   onRequestDelete?: (id: string) => void;
+  /** Concept chip click — defers to AskBox so the user can refine the prompt. */
+  onConceptChip?: (concept: string) => void;
+  /** Fork one or more sibling branches under this node using the given prompts. */
+  onForkPrompts?: (parentNodeId: string, prompts: string[]) => void;
   [key: string]: unknown;
 }
 
@@ -53,11 +62,14 @@ function AnswerNodeComponent({ data }: NodeProps) {
     isRetryDisabled,
     isDeleteDisabled,
     isPinned,
+    isForkDisabled,
     onToggleCollapse,
     onAddBranch,
     onRetry,
     onExpand,
     onRequestDelete,
+    onConceptChip,
+    onForkPrompts,
   } = data as AnswerNodeData;
 
   const status = node.status;
@@ -65,13 +77,20 @@ function AnswerNodeComponent({ data }: NodeProps) {
   const isAborted = status === 'aborted';
   const isError = status === 'error';
   const hasChildren = childCount > 0;
-  const summary = summarizeText(node.content, 280, 'firstBlock');
+  const structured = node.structured;
+  const headline = structured?.title?.trim();
+  const summaryText = structured?.summary?.trim() || summarizeText(node.content, 220, 'firstBlock');
   const tokens = formatTokenUsage(node.tokenUsage);
+  const concepts = structured?.concepts ?? [];
+  const suggestions = structured?.suggestedQuestions ?? [];
+  const hasConcepts = concepts.length > 0;
+  const hasSuggestions = suggestions.length > 0;
+  const structuredErrorText = resolveStructuredErrorText(node.structuredError, t.answer);
 
   return (
     <div
       className={cn(
-        'group/node qa-node-enter relative flex h-[200px] w-[340px] flex-col bg-card text-card-foreground',
+        'group/node qa-node-enter relative flex h-[280px] w-[340px] flex-col bg-card text-card-foreground',
         'rounded-[var(--radius)] qa-card-shadow',
         isSelected && 'qa-card-shadow-active',
         !isSelected && isOnPath && 'ring-1 ring-accent/60',
@@ -94,9 +113,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
       <div
         className={cn(
           'absolute left-3 right-3 top-0 h-px',
-          isOnPath || isSelected
-            ? 'bg-accent/80'
-            : 'bg-hairline/40',
+          isOnPath || isSelected ? 'bg-accent/80' : 'bg-hairline/40',
         )}
       />
 
@@ -188,22 +205,60 @@ function AnswerNodeComponent({ data }: NodeProps) {
         </div>
       )}
 
-      {/* Body — first-paragraph summary, faded at bottom */}
+      {!isStreaming && structuredErrorText && (
+        <div className="flex items-center gap-2 border-b border-border/60 bg-secondary/40 px-3.5 py-1 text-[10.5px] text-muted-foreground">
+          <AlertTriangle className="h-3 w-3" />
+          <span className="truncate font-mono uppercase tracking-[0.14em]">
+            {structuredErrorText}
+          </span>
+        </div>
+      )}
+
+      {/* Body — title + summary preview, faded at bottom */}
       <div className="relative flex-1 overflow-hidden">
         <div
           className={cn(
-            'qa-fade-mask h-full px-4 pb-3 pt-2.5 text-[13.5px] leading-[1.55] text-foreground/90',
+            'qa-fade-mask flex h-full flex-col gap-1.5 px-4 pb-2.5 pt-2.5',
             isStreaming && 'qa-stream-cursor',
           )}
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 400 }}
         >
-          {summary || (
-            <span className="font-sans text-[12.5px] italic text-muted-foreground/70">
-              {isStreaming ? t.answer.generating : t.answer.emptyAnswer}
-            </span>
+          {headline && (
+            <h3
+              className="font-display text-[15.5px] italic leading-tight text-foreground"
+              style={{ fontFeatureSettings: '"ss01"' }}
+            >
+              {headline}
+            </h3>
           )}
+          <div
+            className="flex-1 overflow-hidden text-[13px] leading-[1.55] text-foreground/90"
+            style={{ fontFamily: 'var(--font-display)', fontWeight: 400 }}
+          >
+            {summaryText || (
+              <span className="font-sans text-[12.5px] italic text-muted-foreground/70">
+                {isStreaming ? t.answer.generating : t.answer.emptyAnswer}
+              </span>
+            )}
+          </div>
         </div>
       </div>
+
+      {hasConcepts && (
+        <ConceptStrip
+          concepts={concepts}
+          disabled={isForkDisabled || !onConceptChip}
+          onPick={(c) => onConceptChip?.(c)}
+        />
+      )}
+
+      {hasSuggestions && (
+        <SuggestedStrip
+          suggestions={suggestions}
+          disabled={isForkDisabled}
+          onForkOne={(prompt) => onForkPrompts?.(node.id, [prompt])}
+          onForkMany={(prompts) => onForkPrompts?.(node.id, prompts)}
+        />
+      )}
 
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-border/60 px-3 py-1.5">
@@ -264,6 +319,205 @@ function AnswerNodeComponent({ data }: NodeProps) {
   );
 }
 
+function ConceptStrip({
+  concepts,
+  disabled,
+  onPick,
+}: {
+  concepts: string[];
+  disabled: boolean;
+  onPick: (concept: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1 border-t border-border/60 bg-background/30 px-3 py-1.5"
+      title={t.answer.conceptChipHint}
+    >
+      <span
+        className="mr-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70"
+      >
+        {t.answer.conceptsHeading} ·
+      </span>
+      {concepts.slice(0, 6).map((c) => (
+        <button
+          key={c}
+          type="button"
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (disabled) return;
+            onPick(c);
+          }}
+          className={cn(
+            'rounded-[3px] border border-hairline/50 bg-background/40 px-1.5 py-0.5',
+            'font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground',
+            'transition-colors hover:enabled:border-accent/50 hover:enabled:text-foreground',
+            'disabled:cursor-not-allowed disabled:opacity-50',
+          )}
+        >
+          {c}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SuggestedStrip({
+  suggestions,
+  disabled,
+  onForkOne,
+  onForkMany,
+}: {
+  suggestions: string[];
+  disabled: boolean;
+  onForkOne: (prompt: string) => void;
+  onForkMany: (prompts: string[]) => void;
+}) {
+  const { t } = useI18n();
+  // null = single-click mode; Set = multi-select mode (entries are picked).
+  // Single state keeps mode + selection in lockstep — no desync risk.
+  const [selection, setSelection] = useState<Set<string> | null>(null);
+  const multi = selection != null;
+  const pickedSize = selection?.size ?? 0;
+
+  const toggle = (q: string) => {
+    setSelection((prev) => {
+      if (!prev) return prev;
+      const next = new Set(prev);
+      if (next.has(q)) next.delete(q);
+      else next.add(q);
+      return next;
+    });
+  };
+
+  const submit = () => {
+    if (!selection || selection.size === 0) return;
+    // Preserve the model's ordering rather than Set insertion order so paths
+    // feel intentional.
+    const ordered = suggestions.filter((q) => selection.has(q));
+    onForkMany(ordered);
+    setSelection(null);
+  };
+
+  return (
+    <div
+      className="flex flex-col gap-1 border-t border-accent/25 bg-accent/[0.04] px-3 pb-1.5 pt-1.5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-1.5">
+        <Sparkles className="h-3 w-3 text-accent" />
+        <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-accent">
+          {t.answer.suggestedHeading}
+        </span>
+        <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground/60">
+          · {multi ? `${pickedSize}/${suggestions.length}` : t.answer.suggestedSingleHint}
+        </span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setSelection(multi ? null : new Set());
+          }}
+          className={cn(
+            'ml-auto flex items-center gap-1 rounded-[2px] border px-1.5 py-px',
+            'font-mono text-[9.5px] uppercase tracking-[0.16em] transition-colors',
+            multi
+              ? 'border-accent bg-accent text-accent-foreground'
+              : 'border-hairline/50 text-muted-foreground hover:border-accent/60 hover:text-accent',
+          )}
+        >
+          <ListChecks className="h-2.5 w-2.5" />
+          {multi ? t.answer.suggestedExitMulti : t.answer.suggestedMultiSelect}
+        </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        {suggestions.slice(0, 6).map((q) => {
+          const active = selection?.has(q) ?? false;
+          return (
+            <button
+              key={q}
+              type="button"
+              disabled={disabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (disabled) return;
+                if (multi) toggle(q);
+                else onForkOne(q);
+              }}
+              className={cn(
+                'flex items-center gap-1 rounded-[3px] border px-1.5 py-0.5',
+                'font-display text-[11.5px] italic leading-tight text-foreground',
+                'transition-colors',
+                multi && active
+                  ? 'border-accent bg-accent/15 text-foreground'
+                  : 'border-accent/35 bg-card hover:enabled:border-accent hover:enabled:bg-accent/10',
+                'disabled:cursor-not-allowed disabled:opacity-40',
+              )}
+              title={q}
+            >
+              {multi && (
+                <span
+                  className={cn(
+                    'grid h-3 w-3 place-items-center rounded-[1px] border',
+                    active
+                      ? 'border-accent bg-accent text-accent-foreground'
+                      : 'border-hairline/60 bg-background',
+                  )}
+                >
+                  {active && <Check className="h-2 w-2" />}
+                </span>
+              )}
+              <span className="max-w-[180px] truncate">{q}</span>
+            </button>
+          );
+        })}
+      </div>
+      {multi && (
+        <div className="flex items-center gap-1.5 pt-0.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelection(new Set(suggestions));
+            }}
+            className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground"
+          >
+            {t.answer.suggestedSelectAll}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelection(new Set());
+            }}
+            className="font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground"
+          >
+            {t.answer.suggestedSelectClear}
+          </button>
+          <button
+            type="button"
+            disabled={disabled || pickedSize === 0}
+            onClick={(e) => {
+              e.stopPropagation();
+              submit();
+            }}
+            title={pickedSize === 0 ? t.answer.suggestedBatchEmpty : undefined}
+            className={cn(
+              'ml-auto flex items-center gap-1 rounded-[2px] border px-2 py-px',
+              'font-mono text-[9.5px] uppercase tracking-[0.18em] transition-colors',
+              'border-accent/60 text-accent hover:enabled:bg-accent hover:enabled:text-accent-foreground',
+              'disabled:cursor-not-allowed disabled:opacity-40',
+            )}
+          >
+            {fillTemplate(t.answer.suggestedBatchSubmit, { n: pickedSize })}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function answerNodePropsEqual(
   prev: Readonly<NodeProps>,
   next: Readonly<NodeProps>,
@@ -278,6 +532,8 @@ function answerNodePropsEqual(
     if (a.node.content !== b.node.content) return false;
     if (a.node.status !== b.node.status) return false;
     if (a.node.errorMessage !== b.node.errorMessage) return false;
+    if (a.node.structuredError !== b.node.structuredError) return false;
+    if (a.node.structured !== b.node.structured) return false;
     if (a.node.model !== b.node.model) return false;
     if (a.node.tokenUsage !== b.node.tokenUsage) return false;
   }
@@ -289,6 +545,7 @@ function answerNodePropsEqual(
   if (a.isRetryDisabled !== b.isRetryDisabled) return false;
   if (a.isDeleteDisabled !== b.isDeleteDisabled) return false;
   if (a.isPinned !== b.isPinned) return false;
+  if (a.isForkDisabled !== b.isForkDisabled) return false;
   // Callbacks come from useCallback in TreeCanvas — referentially stable, skip.
   return true;
 }

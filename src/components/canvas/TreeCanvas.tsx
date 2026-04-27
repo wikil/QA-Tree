@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { fillTemplate } from '@/lib/i18n';
 import {
   Background,
   BackgroundVariant,
@@ -21,6 +22,7 @@ import { StartPill } from './StartPill';
 import { CanvasToolbar } from './CanvasToolbar';
 import { EmptyState } from './EmptyState';
 import { DeleteSubtreeDialog } from './DeleteSubtreeDialog';
+import { RegenerateForkDialog } from './RegenerateForkDialog';
 import {
   layoutTree,
   NODE_HEIGHT,
@@ -46,9 +48,11 @@ const edgeTypes = {
 
 interface TreeCanvasProps {
   onAddBranchFocus?: () => void;
+  /** Concept chips invoke this so the user can refine the prompt before sending. */
+  onPrefillAsk?: (text: string) => void;
 }
 
-function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
+function TreeCanvasInner({ onAddBranchFocus, onPrefillAsk }: TreeCanvasProps) {
   const { session, provider, proxy } = useResolvedProvider();
   const { t } = useI18n();
   const sessionTitle = session?.title ?? t.app.defaultSessionTitle;
@@ -68,11 +72,12 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
   const toggleCollapse = useTreeStore((s) => s.toggleCollapse);
   const expandAll = useTreeStore((s) => s.expandAll);
   const collapseAll = useTreeStore((s) => s.collapseAll);
-  const retryNode = useTreeStore((s) => s.retryNode);
+  const sendPrompt = useTreeStore((s) => s.sendPrompt);
   const setNodePosition = useTreeStore((s) => s.setNodePosition);
   const clearAllPositions = useTreeStore((s) => s.clearAllPositions);
 
   const requestDeleteSubtree = useTreeStore((s) => s.requestDeleteSubtree);
+  const requestRegenerateFork = useTreeStore((s) => s.requestRegenerateFork);
 
   const { fitView, setCenter } = useReactFlow();
   const didInitialFit = useRef(false);
@@ -146,11 +151,8 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
   );
 
   const handleRetry = useCallback(
-    (id: string) => {
-      if (!provider) return;
-      void retryNode(id, { provider, proxy });
-    },
-    [provider, proxy, retryNode],
+    (id: string) => requestRegenerateFork(id),
+    [requestRegenerateFork],
   );
 
   const handleExpand = useCallback(
@@ -164,6 +166,34 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
     (id: string) => requestDeleteSubtree(id),
     [requestDeleteSubtree],
   );
+
+  const handleForkPrompts = useCallback(
+    async (parentNodeId: string, prompts: string[]) => {
+      if (!provider) return;
+      const trimmed = prompts.map((p) => p.trim()).filter(Boolean);
+      await Promise.all(
+        trimmed.map((prompt) =>
+          sendPrompt({ parentNodeId, prompt, provider, proxy }).catch((e) => {
+            // eslint-disable-next-line no-console
+            console.error('[TreeCanvas] fork sendPrompt failed:', e);
+          }),
+        ),
+      );
+    },
+    [provider, proxy, sendPrompt],
+  );
+
+  const handleConceptChip = useCallback(
+    (concept: string) => {
+      onPrefillAsk?.(fillTemplate(t.answer.conceptPromptTemplate, { concept }));
+    },
+    [onPrefillAsk, t.answer.conceptPromptTemplate],
+  );
+
+  const activeStreamSessionId = useTreeStore((s) => s.activeStreamSessionId);
+  const blockedByOtherSession =
+    activeStreamSessionId != null && activeStreamSessionId !== loadedSessionId;
+  const forkUnavailable = !provider || blockedByOtherSession;
 
   const reactFlowNodes: Node[] = useMemo(() => {
     const rfNodes: Node[] = [];
@@ -188,14 +218,17 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         isCollapsed: collapsedNodeIds.has(pn.id),
         isOnPath: highlight.nodeIds.has(pn.id),
         isSelected: selectedNodeId === pn.id,
-        isRetryDisabled: streamingNodeIds.has(pn.id) || childCount > 0,
+        isRetryDisabled: streamingNodeIds.has(pn.id) || forkUnavailable,
         isDeleteDisabled: streamingNodeIds.has(pn.id),
         isPinned,
+        isForkDisabled: forkUnavailable || streamingNodeIds.has(pn.id),
         onToggleCollapse: toggleCollapse,
         onAddBranch: handleAddBranch,
         onRetry: handleRetry,
         onExpand: handleExpand,
         onRequestDelete: handleRequestDelete,
+        onConceptChip: handleConceptChip,
+        onForkPrompts: handleForkPrompts,
       };
       rfNodes.push({
         id: pn.id,
@@ -223,6 +256,9 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
     handleRetry,
     handleExpand,
     handleRequestDelete,
+    handleConceptChip,
+    handleForkPrompts,
+    forkUnavailable,
   ]);
 
   const reactFlowEdges: Edge[] = useMemo(() => {
@@ -382,6 +418,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         )}
       </div>
       <DeleteSubtreeDialog />
+      <RegenerateForkDialog />
     </div>
   );
 }

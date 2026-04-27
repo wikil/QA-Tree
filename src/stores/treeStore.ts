@@ -7,9 +7,10 @@ import {
   type NodePosition,
 } from '@/lib/db';
 import { newId } from '@/lib/ids';
-import { buildMessages } from '@/lib/context';
+import { buildMessages, buildSystemPrompt } from '@/lib/context';
 import { LLMError, streamChat } from '@/lib/llm';
 import { useSessionsStore } from '@/stores/sessionsStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import type {
   FinishReason,
   NodeStatus,
@@ -28,7 +29,7 @@ interface SendPromptArgs {
   proxy: ProxyConfig;
 }
 
-interface RetryArgs {
+interface ForkArgs {
   provider: ProviderConfig;
   proxy: ProxyConfig;
 }
@@ -52,6 +53,8 @@ interface TreeState {
   streamingNodeIds: Set<string>;
   /** Node id whose subtree is being confirmed for deletion. Null = no dialog. */
   deleteTargetId: string | null;
+  /** Node id awaiting a regenerate-fork confirm. Null = no dialog. */
+  regenTargetId: string | null;
   /** Manually-pinned node positions for the loaded session. */
   positions: Record<string, NodePosition>;
   /**
@@ -70,10 +73,28 @@ interface TreeState {
   collapseAll: () => Promise<void>;
 
   sendPrompt: (args: SendPromptArgs) => Promise<void>;
-  retryNode: (nodeId: string, args: RetryArgs) => Promise<void>;
+  /**
+   * Regenerate a node's answer by spawning a NEW sibling branch under the same
+   * parent (same prompt, fresh edge id + node id). The original node and any
+   * descendants are left untouched — fork-only is a hard invariant of P3:
+   * generated content is immutable, branches ARE the history.
+   */
+  forkRegenerate: (nodeId: string, args: ForkArgs) => Promise<string | null>;
+  /**
+   * Edit an edge's prompt by spawning a NEW sibling edge under the same
+   * parent (new prompt + new node) and streaming. The original edge / node /
+   * subtree are left untouched.
+   */
+  forkEditPrompt: (
+    edgeId: string,
+    newPrompt: string,
+    args: ForkArgs,
+  ) => Promise<string | null>;
   abortStream: (nodeId: string) => void;
   abortSessionStreams: (sessionId: string) => void;
   requestDeleteSubtree: (nodeId: string | null) => void;
+  requestRegenerateFork: (nodeId: string | null) => void;
+  confirmRegenerateFork: (args: ForkArgs) => Promise<string | null>;
   deleteNodeSubtree: (nodeId: string) => Promise<void>;
   setNodePosition: (nodeId: string, position: NodePosition) => void;
   clearAllPositions: () => Promise<void>;
@@ -200,13 +221,6 @@ export function discardStreamsForSession(sessionId: string) {
   syncStreamingState();
 }
 
-function hasChild(edges: ReadonlyMap<string, QAEdge>, nodeId: string): boolean {
-  for (const edge of edges.values()) {
-    if (edge.fromNodeId === nodeId) return true;
-  }
-  return false;
-}
-
 export function collectSubtreeStats(
   edges: ReadonlyMap<string, QAEdge>,
   rootId: string,
@@ -252,22 +266,89 @@ async function writeCollapsed(sessionId: string, ids: Set<string>): Promise<void
   await db.kv.put({ key: KV_KEYS.collapsedSubtrees, value: map });
 }
 
-function setLoadedNode(node: QANode) {
-  useTreeStore.setState((s) => {
-    if (s.loadedSessionId !== node.sessionId) return s;
-    const cur = s.nodes.get(node.id);
-    if (!cur) return s;
-    const nodes = new Map(s.nodes);
-    nodes.set(node.id, node);
-    return { nodes };
-  });
-}
-
 function assertCanStartStream(sessionId: string) {
   const activeSessionId = getActiveStreamSessionId();
   if (activeSessionId && activeSessionId !== sessionId) {
     throw new Error('另一个 session 正在生成，当前 session 暂不能发起新请求');
   }
+}
+
+/**
+ * Shared core for spawning a brand-new edge+node under an existing parent.
+ * Used by sendPrompt, forkEditPrompt, and forkRegenerate. Always creates
+ * fresh ids — never reuses an existing edge id (P3 invariant: branches ARE
+ * the history; edges and nodes are 1:1 and immutable once created).
+ */
+async function createForkBranch(args: {
+  sessionId: string;
+  parentNodeId: string;
+  prompt: string;
+  provider: ProviderConfig;
+  proxy: ProxyConfig;
+}): Promise<string> {
+  const { sessionId, parentNodeId, prompt, provider, proxy } = args;
+  assertCanStartStream(sessionId);
+  const state = useTreeStore.getState();
+  const parent = state.nodes.get(parentNodeId);
+  if (!parent) throw new Error(`父节点不存在：${parentNodeId}`);
+  if (parent.status === 'streaming') {
+    throw new Error('当前节点仍在生成，完成或中止后才能基于它继续提问');
+  }
+
+  const now = Date.now();
+  const edgeId = newId();
+  const nodeId = newId();
+  const edge: QAEdge = {
+    id: edgeId,
+    sessionId,
+    fromNodeId: parentNodeId,
+    toNodeId: nodeId,
+    prompt,
+    createdAt: now,
+  };
+  const node: QANode = {
+    id: nodeId,
+    sessionId,
+    parentEdgeId: edgeId,
+    role: 'assistant',
+    content: '',
+    status: 'streaming',
+    model: provider.defaultModel,
+    createdAt: now,
+  };
+
+  // 先落盘再流式（CLAUDE.md 红线 #2）
+  await db.transaction('rw', db.nodes, db.edges, async () => {
+    await db.edges.put(edge);
+    await db.nodes.put(node);
+  });
+
+  useTreeStore.setState((s) => {
+    if (s.loadedSessionId !== sessionId) return s;
+    const nodes = new Map(s.nodes);
+    const edges = new Map(s.edges);
+    nodes.set(nodeId, node);
+    edges.set(edgeId, edge);
+    return {
+      nodes,
+      edges,
+      selectedNodeId: nodeId,
+      selectedEdgeId: null,
+      layoutVersion: s.layoutVersion + 1,
+    };
+  });
+
+  void runStream({
+    sessionId,
+    nodeId,
+    parentNodeId,
+    promptForContext: prompt,
+    initialNode: node,
+    provider,
+    proxy,
+  });
+
+  return nodeId;
 }
 
 async function runStream(args: {
@@ -295,7 +376,9 @@ async function runStream(args: {
 
   try {
     const state = useTreeStore.getState();
+    const wantsStructured = provider.capabilities?.responseFormat !== 'unsupported';
     let messages: ReturnType<typeof buildMessages>;
+    let plainMessages: ReturnType<typeof buildMessages>;
     try {
       messages = buildMessages({
         nodes: state.nodes,
@@ -303,7 +386,14 @@ async function runStream(args: {
         parentNodeId,
         userPrompt: promptForContext,
         provider,
+        structured: wantsStructured,
       });
+      // Same path, swap only the system prompt — avoids walking the path twice.
+      // plainMessages is consumed only on JSON-mode rejection (rare), but
+      // streamChat needs it ready in case the first request 4xxs.
+      plainMessages = wantsStructured
+        ? [{ role: 'system', content: buildSystemPrompt(provider) }, ...messages.slice(1)]
+        : messages;
     } catch (e) {
       applyRecordPatch(rec, {
         status: 'error',
@@ -317,6 +407,8 @@ async function runStream(args: {
       provider,
       proxy,
       messages,
+      plainMessages,
+      structured: wantsStructured,
       signal: rec.controller.signal,
       onDelta: (_, full) => {
         if (!isCurrentRecord(rec)) return;
@@ -341,7 +433,13 @@ async function runStream(args: {
       model: result.model ?? provider.defaultModel,
       tokenUsage: result.usage,
       errorMessage: undefined,
+      structured: result.structured,
+      structuredError: result.structuredError,
     });
+
+    if (result.capabilityPatch) {
+      await useSettingsStore.getState().patchProviderCapability(provider.id, result.capabilityPatch);
+    }
   } catch (e) {
     if (rec.controller.signal.aborted) {
       applyRecordPatch(rec, { status: 'aborted', finishReason: 'abort' });
@@ -391,6 +489,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   activeStreamSessionId: null,
   streamingNodeIds: new Set(),
   deleteTargetId: null,
+  regenTargetId: null,
   positions: {},
   layoutVersion: 0,
 
@@ -409,6 +508,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
         streamingNodeIds: new Set(),
         activeStreamSessionId: getActiveStreamSessionId(),
         deleteTargetId: null,
+        regenTargetId: null,
         positions: {},
         layoutVersion: 0,
       });
@@ -447,6 +547,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
       streamingNodeIds: getStreamingNodeIdsForSession(sessionId),
       activeStreamSessionId: getActiveStreamSessionId(),
       deleteTargetId: null,
+      regenTargetId: null,
       positions,
       layoutVersion: 0,
     });
@@ -495,106 +596,51 @@ export const useTreeStore = create<TreeState>((set, get) => ({
   sendPrompt: async ({ parentNodeId, prompt, provider, proxy }) => {
     const sessionId = get().loadedSessionId;
     if (!sessionId) throw new Error('没有载入的 session');
-    assertCanStartStream(sessionId);
     const parent = snapshotNode(get(), parentNodeId);
     if (!parent) throw new Error(`父节点不存在：${parentNodeId}`);
-    if (parent.status === 'streaming') {
-      throw new Error('当前节点仍在生成，完成或中止后才能基于它继续提问');
-    }
-
-    const now = Date.now();
-    const edgeId = newId();
-    const nodeId = newId();
-    const edge: QAEdge = {
-      id: edgeId,
-      sessionId,
-      fromNodeId: parentNodeId,
-      toNodeId: nodeId,
-      prompt,
-      createdAt: now,
-    };
-    const node: QANode = {
-      id: nodeId,
-      sessionId,
-      parentEdgeId: edgeId,
-      role: 'assistant',
-      content: '',
-      status: 'streaming',
-      model: provider.defaultModel,
-      createdAt: now,
-    };
-
-    // 先落盘再流式（核心不变量）
-    await db.transaction('rw', db.nodes, db.edges, async () => {
-      await db.edges.put(edge);
-      await db.nodes.put(node);
-    });
-
-    set((s) => {
-      const nodes = new Map(s.nodes);
-      const edges = new Map(s.edges);
-      nodes.set(nodeId, node);
-      edges.set(edgeId, edge);
-      return {
-        nodes,
-        edges,
-        selectedNodeId: nodeId,
-        selectedEdgeId: null,
-        layoutVersion: s.layoutVersion + 1,
-      };
-    });
-
+    await createForkBranch({ sessionId, parentNodeId, prompt, provider, proxy });
     if (parent.role === 'root') {
       void useSessionsStore.getState().recordFirstPrompt(sessionId, prompt);
     } else {
       void useSessionsStore.getState().touchSession(sessionId);
     }
-
-    void runStream({
-      sessionId,
-      nodeId,
-      parentNodeId,
-      promptForContext: prompt,
-      initialNode: node,
-      provider,
-      proxy,
-    });
   },
 
-  retryNode: async (nodeId, { provider, proxy }) => {
+  forkRegenerate: async (nodeId, { provider, proxy }) => {
     const sessionId = get().loadedSessionId;
     if (!sessionId) throw new Error('没有载入的 session');
-    assertCanStartStream(sessionId);
     const node = snapshotNode(get(), nodeId);
     if (!node) throw new Error(`节点不存在：${nodeId}`);
-    if (!node.parentEdgeId) throw new Error('root 节点不可重试');
-    if (hasChild(get().edges, nodeId)) return;
+    if (!node.parentEdgeId) throw new Error('root 节点不可重新生成');
     const edge = get().edges.get(node.parentEdgeId);
     if (!edge) throw new Error('入边缺失');
-    if (streamRecords.has(nodeId)) return;
-
-    const nextNode: QANode = {
-      ...node,
-      content: '',
-      status: 'streaming',
-      finishReason: undefined,
-      errorMessage: undefined,
-      model: provider.defaultModel,
-      tokenUsage: undefined,
-    };
-    await db.nodes.put(nextNode);
-    setLoadedNode(nextNode);
-    void useSessionsStore.getState().touchSession(sessionId);
-
-    void runStream({
+    const newNodeId = await createForkBranch({
       sessionId,
-      nodeId,
       parentNodeId: edge.fromNodeId,
-      promptForContext: edge.prompt,
-      initialNode: nextNode,
+      prompt: edge.prompt,
       provider,
       proxy,
     });
+    void useSessionsStore.getState().touchSession(sessionId);
+    return newNodeId;
+  },
+
+  forkEditPrompt: async (edgeId, newPrompt, { provider, proxy }) => {
+    const sessionId = get().loadedSessionId;
+    if (!sessionId) throw new Error('没有载入的 session');
+    const edge = get().edges.get(edgeId);
+    if (!edge) throw new Error('边不存在');
+    const trimmed = newPrompt.trim();
+    if (!trimmed) throw new Error('prompt 不能为空');
+    const newNodeId = await createForkBranch({
+      sessionId,
+      parentNodeId: edge.fromNodeId,
+      prompt: trimmed,
+      provider,
+      proxy,
+    });
+    void useSessionsStore.getState().touchSession(sessionId);
+    return newNodeId;
   },
 
   abortStream: (nodeId) => {
@@ -616,6 +662,23 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     const target = get().nodes.get(nodeId);
     if (!target || target.role === 'root') return;
     set({ deleteTargetId: nodeId });
+  },
+
+  requestRegenerateFork: (nodeId) => {
+    if (!nodeId) {
+      set({ regenTargetId: null });
+      return;
+    }
+    const target = get().nodes.get(nodeId);
+    if (!target || target.role === 'root' || !target.parentEdgeId) return;
+    set({ regenTargetId: nodeId });
+  },
+
+  confirmRegenerateFork: async (args) => {
+    const target = get().regenTargetId;
+    if (!target) return null;
+    set({ regenTargetId: null });
+    return get().forkRegenerate(target, args);
   },
 
   deleteNodeSubtree: async (nodeId) => {

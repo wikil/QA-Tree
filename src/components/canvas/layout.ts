@@ -2,7 +2,9 @@ import dagre from 'dagre';
 import type { QAEdge, QANode } from '@/types';
 
 export const NODE_WIDTH = 340;
-export const NODE_HEIGHT = 200;
+// Single uniform height — avoids dagre re-layout when a stream finalizes and
+// the structured chip strips appear.
+export const NODE_HEIGHT = 280;
 export const START_PILL_WIDTH = 76;
 export const START_PILL_HEIGHT = 36;
 export const RANK_SEP = 220;

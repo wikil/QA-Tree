@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { db, KV_KEYS } from '@/lib/db';
-import type { Locale, ProviderConfig, ProxyConfig } from '@/types';
+import type { Locale, ProviderCapabilities, ProviderConfig, ProxyConfig } from '@/types';
 
 const DEFAULT_PROXY: ProxyConfig = {
   enabled: false,
@@ -16,6 +16,12 @@ interface SettingsState {
 
   hydrate: () => Promise<void>;
   upsertProvider: (provider: ProviderConfig) => Promise<void>;
+  /**
+   * Atomically merge a capability patch into a provider. Used by streamChat to
+   * record probed capabilities (e.g. JSON-mode support) without racing against
+   * concurrent user edits — the merge happens inside `set` over current state.
+   */
+  patchProviderCapability: (id: string, patch: Partial<ProviderCapabilities>) => Promise<void>;
   removeProvider: (id: string) => Promise<void>;
   setDefaultProviderId: (id: string | null) => Promise<void>;
   setProxy: (proxy: ProxyConfig) => Promise<void>;
@@ -66,6 +72,25 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (get().defaultProviderId === null) {
       await get().setDefaultProviderId(provider.id);
     }
+  },
+
+  patchProviderCapability: async (id, patch) => {
+    let updated: ProviderConfig | null = null;
+    set((s) => {
+      const idx = s.providers.findIndex((p) => p.id === id);
+      if (idx === -1) return s;
+      const cur = s.providers[idx];
+      const nextCaps: ProviderCapabilities = { ...cur.capabilities, ...patch };
+      const same = (Object.keys(patch) as (keyof ProviderCapabilities)[]).every(
+        (k) => cur.capabilities?.[k] === nextCaps[k],
+      );
+      if (same) return s;
+      updated = { ...cur, capabilities: nextCaps };
+      const providers = s.providers.slice();
+      providers[idx] = updated;
+      return { providers };
+    });
+    if (updated) await db.providers.put(updated);
   },
 
   removeProvider: async (id) => {

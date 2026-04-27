@@ -12,6 +12,12 @@ import { summarizeText } from '@/lib/format';
 
 export interface AskBoxHandle {
   focus: () => void;
+  /**
+   * Replace the current draft and focus the textarea with the cursor at the
+   * end. Used by node concept chips so the user can refine the injected
+   * prompt before sending instead of forking immediately.
+   */
+  prefill: (text: string) => void;
 }
 
 interface BannerKind {
@@ -46,6 +52,21 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
 
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
+    prefill: (text: string) => {
+      setDraft(text);
+      const el = textareaRef.current;
+      if (!el) return;
+      // Defer to next frame so the value lands before we move the caret.
+      requestAnimationFrame(() => {
+        el.focus();
+        const len = el.value.length;
+        try {
+          el.setSelectionRange(len, len);
+        } catch {
+          /* some readonly states throw — safe to ignore */
+        }
+      });
+    },
   }));
 
   const { session, provider, proxy } = useResolvedProvider();

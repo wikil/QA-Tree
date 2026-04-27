@@ -49,6 +49,10 @@ export default function App() {
     askBoxRef.current?.focus();
   }, []);
 
+  const prefillAskBox = useCallback((text: string) => {
+    askBoxRef.current?.prefill(text);
+  }, []);
+
   const handleNewSession = useCallback(async () => {
     await createSession(t.app.defaultSessionTitle);
     focusAskBox();
@@ -214,7 +218,10 @@ export default function App() {
               </span>
             </div>
           ) : (
-            <TreeCanvas onAddBranchFocus={focusAskBox} />
+            <TreeCanvas
+              onAddBranchFocus={focusAskBox}
+              onPrefillAsk={prefillAskBox}
+            />
           )}
         </section>
         <DetailPanel />
