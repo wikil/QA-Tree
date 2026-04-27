@@ -28,7 +28,7 @@ Vite + React 18 + TS · Tailwind + shadcn/ui · `@xyflow/react` v12 + dagre · Z
 ## Architectural Invariants（容易踩坑，写代码前必读）
 
 1. **Path-based context = 项目灵魂**：构造 LLM messages 时**只**走 root → 当前节点路径，绝不混入兄弟分支。算法集中于 `src/lib/context.ts`，所有调用方走它，禁止旁路。
-2. **先落盘再流式**：发送时**同步**写入 `QAEdge` + `QANode(status='streaming', content='')`；SSE delta 仅更新 store，**写盘节流 500ms**；done / abort / error 时最终落一次。这样刷新后流式中断的节点也能保留已生成内容。
+2. **先落盘再流式**：发送时**同步**写入 `QAEdge` + `QANode(status='streaming', content='')`；同一 session 内允许多个节点并发 streaming（同一父节点也可以），跨 session 不并发；SSE delta 通过 stream record 写盘节流 500ms，并只镜像到当前载入 session 的 store。
 3. **折叠是渲染层，不是数据层**：折叠状态保存在 `treeStore` + IndexedDB（per session），布局前过滤掉折叠子树再交 dagre；**节点/边数据本身不动**。
 4. **Dexie 是数据契约**：UI 不直接读 Dexie，只读 store；schema 演进必走 Dexie 版本迁移。
 5. **Provider 解耦**：所有 LLM 请求经 `src/lib/llm.ts`，按 settings 决定直连 vs 本地 proxy；新增 provider = 加预设按钮，**不改调用代码**。

@@ -360,9 +360,10 @@ QA-Tree/
 
 ### 流式与持久化
 - 发送时同步创建 `QAEdge`（prompt 已知）和 `QANode`（status='streaming', content=''）并写入 IndexedDB
-- SSE 解析 delta → 更新 store；写盘节流 500ms，结束/错误时最终写一次
+- 同一 session 内允许多个节点并发 streaming，包括同一父节点下同时创建多个子问题；跨 session 不并发，切到其他 session 后只能查看，不能发起新请求
+- SSE 解析 delta → 更新 stream record；写盘节流 500ms，并且只在该 session 当前载入时镜像到 store；结束/错误时最终写一次
 - 完成时根据 SSE 的 finish_reason 设置：`stop` / `length` → status='done'；用户主动 abort → status='aborted', finishReason='abort'；网络/解析错误 → status='error'
-- 节点上的"重试"按钮：只对该叶子节点重新发请求（沿用同一条入边的 prompt 与同一条上下文路径），不影响其他分支；重试成功覆盖原 content 与 status
+- 节点上的"重试"按钮：只对叶子节点可用（沿用同一条入边的 prompt 与同一条上下文路径），不影响其他分支；重试成功覆盖原 content 与 status
 
 #### 流式时序图
 
