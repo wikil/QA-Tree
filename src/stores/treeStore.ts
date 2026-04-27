@@ -131,28 +131,26 @@ async function runStream(args: {
   streamControllers.set(nodeId, ctl);
   markStreaming(nodeId, true);
 
-  const state = useTreeStore.getState();
-  let messages;
   try {
-    messages = buildMessages({
-      nodes: state.nodes,
-      edges: state.edges,
-      parentNodeId,
-      userPrompt: promptForContext,
-      provider,
-    });
-  } catch (e) {
-    streamControllers.delete(nodeId);
-    updateNode(nodeId, {
-      status: 'error',
-      finishReason: 'error',
-      errorMessage: `构造上下文失败：${(e as Error).message}`,
-    });
-    await flushNode(nodeId);
-    return;
-  }
+    const state = useTreeStore.getState();
+    let messages: ReturnType<typeof buildMessages>;
+    try {
+      messages = buildMessages({
+        nodes: state.nodes,
+        edges: state.edges,
+        parentNodeId,
+        userPrompt: promptForContext,
+        provider,
+      });
+    } catch (e) {
+      updateNode(nodeId, {
+        status: 'error',
+        finishReason: 'error',
+        errorMessage: `构造上下文失败：${(e as Error).message}`,
+      });
+      return;
+    }
 
-  try {
     const result = await streamChat({
       provider,
       proxy,
@@ -343,6 +341,11 @@ export const useTreeStore = create<TreeState>((set, get) => ({
     if (!node.parentEdgeId) throw new Error('root 节点不可重试');
     const edge = get().edges.get(node.parentEdgeId);
     if (!edge) throw new Error('入边缺失');
+
+    const existingCtl = streamControllers.get(nodeId);
+    if (get().streamingNodeIds.has(nodeId) || (existingCtl && !existingCtl.signal.aborted)) {
+      return;
+    }
 
     abortAndCleanup(nodeId);
 

@@ -55,6 +55,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
   const selectedNodeId = useTreeStore((s) => s.selectedNodeId);
   const selectedEdgeId = useTreeStore((s) => s.selectedEdgeId);
   const collapsedNodeIds = useTreeStore((s) => s.collapsedNodeIds);
+  const streamingNodeIds = useTreeStore((s) => s.streamingNodeIds);
   const selectNode = useTreeStore((s) => s.selectNode);
   const selectEdge = useTreeStore((s) => s.selectEdge);
   const toggleCollapse = useTreeStore((s) => s.toggleCollapse);
@@ -166,6 +167,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
         isCollapsed: collapsedNodeIds.has(pn.id),
         isOnPath: highlight.nodeIds.has(pn.id),
         isSelected: selectedNodeId === pn.id,
+        isRetryDisabled: streamingNodeIds.has(pn.id),
         onToggleCollapse: toggleCollapse,
         onAddBranch: handleAddBranch,
         onRetry: handleRetry,
@@ -188,6 +190,7 @@ function TreeCanvasInner({ onAddBranchFocus }: TreeCanvasProps) {
     childrenByParent,
     descendantCount,
     collapsedNodeIds,
+    streamingNodeIds,
     highlight.nodeIds,
     selectedNodeId,
     toggleCollapse,

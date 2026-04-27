@@ -14,9 +14,9 @@ export interface PathStep {
 }
 
 export interface WalkStep {
-  /** Node at this step. `null` only when the chain hits a missing parent (lenient mode). */
+  /** Node at this step. */
   node: QANode | null;
-  /** Incoming edge from parent. `null` for root. */
+  /** Incoming edge from parent. `null` for root or a broken link in lenient mode. */
   edge: QAEdge | null;
 }
 
@@ -44,7 +44,6 @@ export function walkPathToRoot(
   }
   const reversed: WalkStep[] = [];
   let cur: QANode | undefined = leaf;
-  let incoming: QAEdge | null = null;
   const seen = new Set<string>();
   while (cur) {
     if (seen.has(cur.id)) {
@@ -52,14 +51,20 @@ export function walkPathToRoot(
       break;
     }
     seen.add(cur.id);
-    reversed.push({ node: cur, edge: incoming });
-    if (!cur.parentEdgeId) break;
+
+    if (!cur.parentEdgeId) {
+      reversed.push({ node: cur, edge: null });
+      break;
+    }
+
     const edge = edges.get(cur.parentEdgeId);
     if (!edge) {
       if (strict) throw new Error(`入边缺失：${cur.parentEdgeId}`);
+      reversed.push({ node: cur, edge: null });
       break;
     }
-    incoming = edge;
+    reversed.push({ node: cur, edge });
+
     cur = nodes.get(edge.fromNodeId);
     if (!cur && strict) throw new Error(`父节点缺失：${edge.fromNodeId}`);
   }

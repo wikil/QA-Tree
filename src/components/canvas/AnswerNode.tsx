@@ -18,6 +18,7 @@ export interface AnswerNodeData {
   isCollapsed: boolean;
   isOnPath: boolean;
   isSelected: boolean;
+  isRetryDisabled: boolean;
   onToggleCollapse?: (id: string) => void;
   onAddBranch?: (id: string) => void;
   onRetry?: (id: string) => void;
@@ -42,6 +43,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
     isCollapsed,
     isOnPath,
     isSelected,
+    isRetryDisabled,
     onToggleCollapse,
     onAddBranch,
     onRetry,
@@ -108,13 +110,16 @@ function AnswerNodeComponent({ data }: NodeProps) {
           <button
             type="button"
             aria-label="重新生成"
+            title={isRetryDisabled ? '生成中不可重新生成' : '重新生成'}
+            disabled={isRetryDisabled}
             onClick={(e) => {
               e.stopPropagation();
+              if (isRetryDisabled) return;
               onRetry?.(node.id);
             }}
-            className="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+            className="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:enabled:bg-secondary hover:enabled:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <RefreshCw className="h-3 w-3" />
+            <RefreshCw className={cn('h-3 w-3', isRetryDisabled && 'animate-spin')} />
           </button>
         </div>
       </div>
@@ -133,11 +138,13 @@ function AnswerNodeComponent({ data }: NodeProps) {
           </span>
           <button
             type="button"
+            disabled={isRetryDisabled}
             onClick={(e) => {
               e.stopPropagation();
+              if (isRetryDisabled) return;
               onRetry?.(node.id);
             }}
-            className="font-mono text-[10px] uppercase tracking-wider underline-offset-2 hover:underline"
+            className="font-mono text-[10px] uppercase tracking-wider underline-offset-2 hover:enabled:underline disabled:cursor-not-allowed disabled:opacity-40"
           >
             重新生成
           </button>
@@ -242,6 +249,7 @@ function answerNodePropsEqual(
   if (a.isCollapsed !== b.isCollapsed) return false;
   if (a.isOnPath !== b.isOnPath) return false;
   if (a.isSelected !== b.isSelected) return false;
+  if (a.isRetryDisabled !== b.isRetryDisabled) return false;
   // Callbacks come from useCallback in TreeCanvas — referentially stable, skip.
   return true;
 }
