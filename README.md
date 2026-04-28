@@ -1,5 +1,7 @@
 # QA-Tree
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 *English · [简体中文](./README.zh-CN.md)*
 
 > Study a topic with an LLM by forking off any answer along a concept — and never let one branch pollute another.
@@ -41,6 +43,6 @@ Sessions, providers, fold state — all in your browser's IndexedDB. **API keys 
 - Architectural invariants & dev rules: [`CLAUDE.md`](./CLAUDE.md) · [`AGENTS.md`](./AGENTS.md)
 - Optional proxy: [`proxy/README.md`](./proxy/README.md)
 
----
+## License
 
-*Personal project. License TBD — open an issue before sending a PR.*
+[MIT](./LICENSE) © 2026 Joshua Sun. PRs welcome — please open an issue first to align on direction.

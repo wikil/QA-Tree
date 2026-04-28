@@ -1,5 +1,7 @@
 # QA-Tree
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 *[English](./README.md) · 简体中文*
 
 > 用 LLM 深入学一个主题时，沿任一回答的某个概念分叉延伸，多分叉互不污染。
@@ -41,6 +43,6 @@ Vite + React 18 + TS · Tailwind + shadcn/ui · `@xyflow/react` v12 + dagre · Z
 - 架构红线与开发约定：[`CLAUDE.md`](./CLAUDE.md) · [`AGENTS.md`](./AGENTS.md)
 - 可选 proxy：[`proxy/README.md`](./proxy/README.md)
 
----
+## 协议
 
-*Personal project. License TBD；提 PR 前请先开 issue 对齐方向。*
+[MIT](./LICENSE) © 2026 Joshua Sun。欢迎 PR——提交前请先开 issue 对齐方向。
