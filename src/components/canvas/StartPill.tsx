@@ -12,7 +12,7 @@ function StartPillComponent() {
     <div className="group/start relative flex h-9 w-[76px] items-center justify-center">
       <Handle
         type="source"
-        position={Position.Right}
+        position={Position.Bottom}
         className="qa-handle"
         isConnectable={false}
       />

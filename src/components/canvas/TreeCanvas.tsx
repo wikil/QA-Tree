@@ -261,8 +261,8 @@ function TreeCanvasInner({ onAddBranchFocus, onPrefillAsk }: TreeCanvasProps) {
           id: `${pn.id}__rail`,
           type: SUGGESTED_RAIL_NODE_TYPE,
           position: {
-            x: pn.x + NODE_WIDTH + SUGGESTED_RAIL_GAP,
-            y: pn.y + Math.max(0, (NODE_HEIGHT - railHeight) / 2),
+            x: pn.x + (NODE_WIDTH - SUGGESTED_RAIL_WIDTH) / 2,
+            y: pn.y + NODE_HEIGHT + SUGGESTED_RAIL_GAP,
           },
           data: railData as unknown as Record<string, unknown>,
           draggable: false,

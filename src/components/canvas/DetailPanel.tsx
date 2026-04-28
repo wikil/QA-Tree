@@ -19,11 +19,6 @@ import { STATUS_BADGE_STYLE } from './AnswerNode';
 import { resolveStructuredErrorText } from './structuredErrorText';
 import type { NodeStatus, QAEdge, QANode } from '@/types';
 
-const DEFAULT_HEIGHT = 360;
-const COLLAPSED_HEIGHT = 32;
-const MIN_HEIGHT = 200;
-const MAX_HEIGHT = 720;
-
 const STATUS_LABEL: Record<NodeStatus, string> = {
   streaming: 'STREAMING',
   done: 'DONE',
@@ -115,10 +110,6 @@ export function DetailPanel() {
   }, [editingEdgeId, editDraft, provider, proxy, forkEditPrompt]);
 
   const [open, setOpen] = useState(false);
-  const [height, setHeight] = useState(DEFAULT_HEIGHT);
-  const draggingRef = useRef(false);
-  const dragStartYRef = useRef(0);
-  const dragStartHRef = useRef(0);
 
   // Auto-open only on the transition from no-selection → selection. Do NOT
   // override a manual fold, and do NOT auto-close on selection clear.
@@ -164,35 +155,6 @@ export function DetailPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edges, selectedNodeId, selectedEdgeId, t.detail.emptyPrompt]);
 
-  const onDragStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      if (!open) return;
-      draggingRef.current = true;
-      dragStartYRef.current = e.clientY;
-      dragStartHRef.current = height;
-    },
-    [open, height],
-  );
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!draggingRef.current) return;
-      const dy = dragStartYRef.current - e.clientY;
-      const next = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, dragStartHRef.current + dy));
-      setHeight(next);
-    };
-    const onUp = () => {
-      draggingRef.current = false;
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, []);
-
   const goto = (seg: BreadcrumbSeg) => {
     if (seg.kind === 'edge') selectEdge(seg.id);
     else if (seg.kind === 'root') selectNode(null);
@@ -200,7 +162,6 @@ export function DetailPanel() {
   };
 
   const hasSelection = trail.length > 0;
-  const totalHeight = open ? height : COLLAPSED_HEIGHT;
 
   const selectedNode = selectedNodeId ? nodes.get(selectedNodeId) : undefined;
   const selectedEdge = selectedEdgeId ? edges.get(selectedEdgeId) : undefined;
@@ -214,21 +175,18 @@ export function DetailPanel() {
 
   return (
     <div
-      className="flex shrink-0 flex-col overflow-hidden border-t border-border/60 bg-card/95 transition-[height] duration-200 ease-out"
-      style={{ height: `${totalHeight}px` }}
+      className={cn(
+        'flex shrink-0 flex-col overflow-hidden border-b border-border/60 bg-card/95',
+        open && 'max-h-[55vh]',
+      )}
     >
       <div
         className={cn(
-          'group/bar relative flex h-8 shrink-0 items-center px-6 backdrop-blur-[1px]',
-          open ? 'cursor-ns-resize' : hasSelection ? 'cursor-pointer' : 'cursor-default',
+          'group/bar relative flex h-8 shrink-0 items-center px-4 backdrop-blur-[1px]',
+          !open && hasSelection ? 'cursor-pointer' : 'cursor-default',
         )}
-        onMouseDown={open ? onDragStart : undefined}
         onClick={!open && hasSelection ? () => setOpen(true) : undefined}
       >
-        {open && (
-          <span className="pointer-events-none absolute left-1/2 top-[3px] h-[3px] w-6 -translate-x-1/2 rounded-[1px] bg-accent/40 transition-all duration-200 group-hover/bar:w-8 group-hover/bar:bg-accent" />
-        )}
-
         <nav className="flex flex-1 items-center gap-1.5 overflow-hidden">
           {hasSelection ? (
             trail.map((seg, i) => (

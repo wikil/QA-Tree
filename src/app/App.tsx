@@ -224,9 +224,12 @@ export default function App() {
             />
           )}
         </section>
+      </main>
+
+      <aside className="flex w-[420px] shrink-0 flex-col border-l border-border bg-background">
         <DetailPanel />
         <AskBox ref={askBoxRef} />
-      </main>
+      </aside>
     </div>
   );
 }

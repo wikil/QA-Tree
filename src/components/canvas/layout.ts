@@ -7,12 +7,12 @@ export const NODE_WIDTH = 340;
 export const NODE_HEIGHT = 280;
 export const START_PILL_WIDTH = 76;
 export const START_PILL_HEIGHT = 36;
-export const RANK_SEP = 220;
-export const NODE_SEP = 64;
+export const RANK_SEP = 140;
+export const NODE_SEP = 96;
 export const EDGE_SEP = 28;
 
 export const SUGGESTED_RAIL_NODE_TYPE = 'suggestedRail';
-export const SUGGESTED_RAIL_WIDTH = 196;
+export const SUGGESTED_RAIL_WIDTH = NODE_WIDTH;
 export const SUGGESTED_RAIL_GAP = 16;
 export const MAX_SUGGESTION_CHIPS = 6;
 const RAIL_HEADER_HEIGHT = 18;
@@ -92,7 +92,7 @@ export function layoutTree(args: {
 
   const g = new dagre.graphlib.Graph({ multigraph: false });
   g.setGraph({
-    rankdir: 'LR',
+    rankdir: 'TB',
     ranksep: RANK_SEP,
     nodesep: NODE_SEP,
     edgesep: EDGE_SEP,

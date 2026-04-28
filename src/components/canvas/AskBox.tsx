@@ -157,7 +157,7 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
   const nextDepth = parentDepth + 1;
 
   return (
-    <div className="border-t border-border/60 bg-background">
+    <div className="flex flex-1 flex-col overflow-hidden bg-background">
       {blockedByOtherSession && (
         <div className="flex items-center gap-3 border-b border-accent/25 bg-accent/8 px-6 py-1.5">
           <span className="relative inline-flex h-1.5 w-1.5">
@@ -210,30 +210,30 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
         )}
       </div>
 
-      {suggestions && suggestions.length > 0 && !disabled && (
-        <div className="flex flex-wrap items-center gap-1.5 px-6 pb-1 pt-1.5">
-          <span className="flex shrink-0 items-center gap-1 font-mono text-[9.5px] uppercase tracking-[0.18em] text-accent">
-            <Sparkles className="h-3 w-3" />
-            {t.answer.suggestedHeading}
-          </span>
-          {suggestions.slice(0, MAX_SUGGESTION_CHIPS).map((q) => (
-            <SuggestionChip
-              key={q}
-              text={q}
-              dense
-              onPick={() => void forkSuggestion(q)}
-            />
-          ))}
-        </div>
-      )}
+      <div className="mt-auto flex flex-col gap-2 px-6 pb-4 pt-2">
+        {suggestions && suggestions.length > 0 && !disabled && (
+          <div className="flex flex-wrap items-center gap-1.5 pb-1">
+            <span className="flex w-full shrink-0 items-center gap-1 font-mono text-[9.5px] uppercase tracking-[0.18em] text-accent">
+              <Sparkles className="h-3 w-3" />
+              {t.answer.suggestedHeading}
+            </span>
+            {suggestions.slice(0, MAX_SUGGESTION_CHIPS).map((q) => (
+              <SuggestionChip
+                key={q}
+                text={q}
+                dense
+                onPick={() => void forkSuggestion(q)}
+              />
+            ))}
+          </div>
+        )}
 
-      <div className="flex items-end gap-3 px-6 pb-3 pt-1">
-        <span className="select-none pb-2 font-mono text-[10.5px] uppercase tracking-[0.18em] text-accent">
+        <span className="select-none font-mono text-[10.5px] uppercase tracking-[0.18em] text-accent">
           Q{nextDepth} ↦
         </span>
         <textarea
           ref={textareaRef}
-          rows={2}
+          rows={4}
           value={draft}
           disabled={disabled}
           onChange={(e) => setDraft(e.target.value)}
@@ -246,7 +246,7 @@ export const AskBox = forwardRef<AskBoxHandle>(function AskBox(_, ref) {
             labels: t.ask,
           })}
           className={cn(
-            'flex-1 resize-none bg-transparent px-0 py-1.5 text-[14.5px] leading-[1.55] outline-none',
+            'w-full resize-none bg-transparent px-0 py-1.5 text-[14.5px] leading-[1.55] outline-none',
             'placeholder:italic placeholder:text-muted-foreground/55',
             'disabled:cursor-not-allowed disabled:text-muted-foreground/60',
           )}

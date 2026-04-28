@@ -49,14 +49,14 @@ function PromptEdgeComponent({
     offset: 24,
   });
 
-  // Sibling edges share sourceX/sourceY/targetX — only targetY is unique per
-  // sibling. So we pin labelY into the vertical corridor between source and
-  // target rows; each sibling's label naturally lands at a different Y and
-  // they never stack. For same-row edges this collapses to the horizontal
-  // line, with the -50%/-50% transform lifting the label over the stroke.
-  const labelX = sourceX + (targetX - sourceX) * 0.5;
-  const sameRow = Math.abs(targetY - sourceY) < 1;
-  const labelY = sameRow ? sourceY - 12 : (sourceY + targetY) / 2;
+  // TB layout: sibling edges share sourceX/sourceY/targetY — only targetX is
+  // unique per sibling. We pin labelX into the horizontal corridor between
+  // source and target columns so each sibling's label lands at a different X
+  // and they never stack. For same-column edges this collapses to the vertical
+  // line, with the -50%/-50% transform lifting the label off the stroke.
+  const labelY = sourceY + (targetY - sourceY) * 0.5;
+  const sameCol = Math.abs(targetX - sourceX) < 1;
+  const labelX = sameCol ? sourceX + 12 : (sourceX + targetX) / 2;
 
   const active = selected || isOnPath;
   const dimmed = hasSelection && !active;

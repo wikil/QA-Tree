@@ -92,13 +92,13 @@ function AnswerNodeComponent({ data }: NodeProps) {
     >
       <Handle
         type="target"
-        position={Position.Left}
+        position={Position.Top}
         className="qa-handle"
         isConnectable={false}
       />
       <Handle
         type="source"
-        position={Position.Right}
+        position={Position.Bottom}
         className="qa-handle"
         isConnectable={false}
       />
@@ -281,7 +281,7 @@ function AnswerNodeComponent({ data }: NodeProps) {
         </button>
       </div>
 
-      {/* Hover branch-adder — slides out from right edge */}
+      {/* Hover branch-adder — slides out from bottom edge */}
       <button
         type="button"
         aria-label={t.answer.addBranch}
@@ -290,10 +290,10 @@ function AnswerNodeComponent({ data }: NodeProps) {
           onAddBranch?.(node.id);
         }}
         className={cn(
-          'absolute -right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center',
+          'absolute -bottom-3 left-1/2 grid h-7 w-7 -translate-x-1/2 place-items-center',
           'rounded-full border border-hairline/60 bg-card text-foreground',
           'opacity-0 transition-all duration-200 ease-out',
-          'group-hover/node:opacity-100 group-hover/node:translate-x-1',
+          'group-hover/node:opacity-100 group-hover/node:translate-y-1',
           'hover:bg-accent hover:text-accent-foreground hover:border-accent',
         )}
       >
@@ -383,7 +383,7 @@ export function SuggestionChip({
         'disabled:cursor-not-allowed disabled:opacity-40',
         dense
           ? 'max-w-[260px] items-center py-0.5'
-          : 'max-w-[200px] items-start bg-card/95 py-1 text-left qa-card-shadow',
+          : 'w-full items-start bg-card/95 py-1 text-left qa-card-shadow',
       )}
     >
       <span
