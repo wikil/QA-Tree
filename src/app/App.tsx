@@ -3,10 +3,16 @@ import { Link } from 'react-router-dom';
 import { Settings, Plus, Search } from 'lucide-react';
 import { TreeCanvas } from '@/components/canvas/TreeCanvas';
 import { DetailPanel } from '@/components/canvas/DetailPanel';
+import { ChatThread } from '@/components/canvas/ChatThread';
 import { AskBox, type AskBoxHandle } from '@/components/canvas/AskBox';
 import { SessionRow } from '@/components/sidebar/SessionRow';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { buttonVariants } from '@/components/ui/button';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessionsStore';
@@ -209,27 +215,40 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <section className="flex-1 overflow-hidden">
-          {!settingsHydrated ? (
-            <div className="flex h-full w-full items-center justify-center">
-              <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-muted-foreground">
-                {t.common.loading}
-              </span>
+      <ResizablePanelGroup
+        direction="horizontal"
+        autoSaveId="qa-tree:right-rail"
+        className="flex-1"
+      >
+        <ResizablePanel defaultSize={68} minSize={45}>
+          <main className="flex h-full flex-col overflow-hidden">
+            <section className="flex-1 overflow-hidden">
+              {!settingsHydrated ? (
+                <div className="flex h-full w-full items-center justify-center">
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-muted-foreground">
+                    {t.common.loading}
+                  </span>
+                </div>
+              ) : (
+                <TreeCanvas
+                  onAddBranchFocus={focusAskBox}
+                  onPrefillAsk={prefillAskBox}
+                />
+              )}
+            </section>
+          </main>
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={32} minSize={22} maxSize={55}>
+          <aside className="flex h-full flex-col border-l border-border bg-background">
+            <DetailPanel />
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ChatThread />
             </div>
-          ) : (
-            <TreeCanvas
-              onAddBranchFocus={focusAskBox}
-              onPrefillAsk={prefillAskBox}
-            />
-          )}
-        </section>
-      </main>
-
-      <aside className="flex w-[420px] shrink-0 flex-col border-l border-border bg-background">
-        <DetailPanel />
-        <AskBox ref={askBoxRef} />
-      </aside>
+            <AskBox ref={askBoxRef} />
+          </aside>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }

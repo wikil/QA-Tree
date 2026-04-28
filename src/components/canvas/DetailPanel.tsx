@@ -1,23 +1,14 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ChevronDown,
-  ChevronUp,
-  CornerDownLeft,
-  GitFork,
-  RefreshCw,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { Fragment, useMemo } from 'react';
+import { RefreshCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Markdown } from '@/components/Markdown';
 import { useTreeStore } from '@/stores/treeStore';
+import { useSessionsStore, selectCurrentSession } from '@/stores/sessionsStore';
 import { useResolvedProvider } from '@/hooks/useResolvedProvider';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, fillTemplate } from '@/lib/i18n';
 import { walkPathToRoot } from '@/lib/context';
 import { summarizeText, formatAbsoluteTime, formatTokenUsage } from '@/lib/format';
 import { STATUS_BADGE_STYLE } from './AnswerNode';
-import { resolveStructuredErrorText } from './structuredErrorText';
-import type { NodeStatus, QAEdge, QANode } from '@/types';
+import type { NodeStatus, QANode } from '@/types';
 
 const STATUS_LABEL: Record<NodeStatus, string> = {
   streaming: 'STREAMING',
@@ -32,10 +23,12 @@ interface BreadcrumbSeg {
   label: string;
 }
 
-const BREADCRUMB_BASE = 'truncate transition-colors hover:text-foreground hover:underline underline-offset-[3px]';
+const BREADCRUMB_BASE =
+  'truncate transition-colors hover:text-foreground hover:underline underline-offset-[3px]';
 
 function breadcrumbClass(seg: BreadcrumbSeg, isLast: boolean): string {
-  if (seg.kind === 'root') return cn(BREADCRUMB_BASE, 'font-display text-[11px] italic text-muted-foreground');
+  if (seg.kind === 'root')
+    return cn(BREADCRUMB_BASE, 'font-display text-[11px] italic text-muted-foreground');
   const base = cn(BREADCRUMB_BASE, 'font-mono text-[10px] uppercase tracking-[0.16em]');
   if (seg.kind === 'edge') return cn(base, 'text-accent');
   return cn(base, isLast ? 'text-foreground' : 'text-muted-foreground');
@@ -45,6 +38,7 @@ export function DetailPanel() {
   const { t } = useI18n();
   const nodes = useTreeStore((s) => s.nodes);
   const edges = useTreeStore((s) => s.edges);
+  const treeNodeCount = useTreeStore((s) => s.nodes.size);
   const selectedNodeId = useTreeStore((s) => s.selectedNodeId);
   const selectedEdgeId = useTreeStore((s) => s.selectedEdgeId);
   const streamingNodeIds = useTreeStore((s) => s.streamingNodeIds);
@@ -54,71 +48,12 @@ export function DetailPanel() {
   const selectEdge = useTreeStore((s) => s.selectEdge);
   const requestDeleteSubtree = useTreeStore((s) => s.requestDeleteSubtree);
   const requestRegenerateFork = useTreeStore((s) => s.requestRegenerateFork);
-  const forkEditPrompt = useTreeStore((s) => s.forkEditPrompt);
-  const { provider, proxy } = useResolvedProvider();
+  const session = useSessionsStore(selectCurrentSession);
+  const { provider } = useResolvedProvider();
 
   const blockedByOtherSession =
     activeStreamSessionId !== null && activeStreamSessionId !== loadedSessionId;
   const canFork = provider != null && !blockedByOtherSession;
-
-  const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState('');
-  const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useEffect(() => {
-    if (editingEdgeId && selectedEdgeId !== editingEdgeId) {
-      setEditingEdgeId(null);
-      setEditDraft('');
-    }
-  }, [selectedEdgeId, editingEdgeId]);
-
-  useEffect(() => {
-    if (editingEdgeId && editTextareaRef.current) {
-      const el = editTextareaRef.current;
-      el.focus();
-      const len = el.value.length;
-      try {
-        el.setSelectionRange(len, len);
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [editingEdgeId]);
-
-  const beginEditPrompt = useCallback((edge: QAEdge) => {
-    setEditingEdgeId(edge.id);
-    setEditDraft(edge.prompt);
-  }, []);
-
-  const cancelEditPrompt = useCallback(() => {
-    setEditingEdgeId(null);
-    setEditDraft('');
-  }, []);
-
-  const submitEditPrompt = useCallback(async () => {
-    if (!editingEdgeId || !provider) return;
-    const trimmed = editDraft.trim();
-    if (!trimmed) return;
-    try {
-      await forkEditPrompt(editingEdgeId, trimmed, { provider, proxy });
-      setEditingEdgeId(null);
-      setEditDraft('');
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error('[DetailPanel] forkEditPrompt failed:', e);
-    }
-  }, [editingEdgeId, editDraft, provider, proxy, forkEditPrompt]);
-
-  const [open, setOpen] = useState(false);
-
-  // Auto-open only on the transition from no-selection → selection. Do NOT
-  // override a manual fold, and do NOT auto-close on selection clear.
-  const prevHadSelectionRef = useRef(false);
-  useEffect(() => {
-    const has = selectedNodeId != null || selectedEdgeId != null;
-    if (has && !prevHadSelectionRef.current) setOpen(true);
-    prevHadSelectionRef.current = has;
-  }, [selectedNodeId, selectedEdgeId]);
 
   const trail: BreadcrumbSeg[] = useMemo(() => {
     if (!selectedNodeId && !selectedEdgeId) return [];
@@ -137,7 +72,7 @@ export function DetailPanel() {
         segs.push({
           id: node.id,
           kind: 'node',
-          label: `A${depth} · ${summarizeText(node.content, 18)}`,
+          label: `A${depth} · ${summarizeText(node.content, 14)}`,
         });
       }
     }
@@ -147,13 +82,15 @@ export function DetailPanel() {
         segs.push({
           id: edge.id,
           kind: 'edge',
-          label: `Q${depth + 1} · ${summarizeText(edge.prompt, 18) || t.detail.emptyPrompt}`,
+          label: `Q${depth + 1} · ${summarizeText(edge.prompt, 14) || t.detail.emptyPrompt}`,
         });
       }
     }
     return segs;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edges, selectedNodeId, selectedEdgeId, t.detail.emptyPrompt]);
+  }, [edges, nodes, selectedNodeId, selectedEdgeId, t.detail.emptyPrompt]);
+
+  const selectedNode = selectedNodeId ? nodes.get(selectedNodeId) : undefined;
+  const selectedEdge = selectedEdgeId ? edges.get(selectedEdgeId) : undefined;
 
   const goto = (seg: BreadcrumbSeg) => {
     if (seg.kind === 'edge') selectEdge(seg.id);
@@ -163,33 +100,25 @@ export function DetailPanel() {
 
   const hasSelection = trail.length > 0;
 
-  const selectedNode = selectedNodeId ? nodes.get(selectedNodeId) : undefined;
-  const selectedEdge = selectedEdgeId ? edges.get(selectedEdgeId) : undefined;
-
   // Streaming descendants don't block deletion: the dialog warns and the
   // store action aborts them. Only the clicked node itself blocks.
   const canDeleteSelected =
     selectedNode != null &&
     selectedNode.role !== 'root' &&
     !streamingNodeIds.has(selectedNode.id);
+  const canRegenerateSelected =
+    canFork &&
+    selectedNode != null &&
+    selectedNode.role !== 'root' &&
+    !streamingNodeIds.has(selectedNode.id);
 
   return (
-    <div
-      className={cn(
-        'flex shrink-0 flex-col overflow-hidden border-b border-border/60 bg-card/95',
-        open && 'max-h-[55vh]',
-      )}
-    >
-      <div
-        className={cn(
-          'group/bar relative flex h-8 shrink-0 items-center px-4 backdrop-blur-[1px]',
-          !open && hasSelection ? 'cursor-pointer' : 'cursor-default',
-        )}
-        onClick={!open && hasSelection ? () => setOpen(true) : undefined}
-      >
-        <nav className="flex flex-1 items-center gap-1.5 overflow-hidden">
-          {hasSelection ? (
-            trail.map((seg, i) => (
+    <div className="flex shrink-0 flex-col border-b border-border/60 bg-card/95">
+      {/* Line 1 — breadcrumb (or empty-state session label) */}
+      <div className="flex h-7 items-center gap-1.5 px-4">
+        {hasSelection ? (
+          <nav className="flex flex-1 items-center gap-1.5 overflow-hidden">
+            {trail.map((seg, i) => (
               <Fragment key={`${seg.kind}-${seg.id}`}>
                 {i > 0 && (
                   <span className="font-mono text-[9px] text-muted-foreground/40">
@@ -198,215 +127,85 @@ export function DetailPanel() {
                 )}
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    goto(seg);
-                  }}
+                  onClick={() => goto(seg)}
                   className={breadcrumbClass(seg, i === trail.length - 1)}
                   title={seg.label}
                 >
                   {seg.label}
                 </button>
               </Fragment>
-            ))
-          ) : (
-            <span className="font-display text-[12px] italic text-muted-foreground/70">
-              {t.detail.noSelection}
-            </span>
-          )}
-        </nav>
-
-        {hasSelection && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen((o) => !o);
-            }}
-            className="ml-2 flex shrink-0 items-center gap-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground"
-            aria-label={open ? t.detail.collapsePanel : t.detail.expandPanel}
-          >
-            {open ? (
+            ))}
+          </nav>
+        ) : (
+          <div className="flex flex-1 items-baseline gap-2 overflow-hidden">
+            {session ? (
               <>
-                <ChevronDown className="h-3 w-3" />
-                {t.detail.collapse}
+                <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
+                  {t.detail.sessionLabel}
+                </span>
+                <span
+                  className="truncate font-display text-[12.5px] italic text-foreground/80"
+                  style={{ fontFeatureSettings: '"ss01"' }}
+                  title={session.title}
+                >
+                  {session.title}
+                </span>
+                <span className="font-mono text-[9.5px] text-muted-foreground/40">
+                  ·
+                </span>
+                <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {fillTemplate(t.detail.nodesCount, {
+                    count: Math.max(0, treeNodeCount - 1),
+                  })}
+                </span>
               </>
             ) : (
-              <>
-                <ChevronUp className="h-3 w-3" />
-                {t.detail.expand}
-              </>
+              <span className="font-display text-[12px] italic text-muted-foreground/70">
+                {t.ask.noActiveSession}
+              </span>
             )}
-          </button>
+          </div>
         )}
       </div>
 
-      {open && hasSelection && (
-        <div className="flex flex-1 flex-col overflow-hidden border-t border-border/30">
+      {/* Line 2 — meta strip (only when something is selected) */}
+      {hasSelection && (
+        <div className="border-t border-border/40">
           {selectedNode && selectedNode.role !== 'root' && (
             <NodeMetaStrip
               node={selectedNode}
-              canDelete={canDeleteSelected}
               streaming={streamingNodeIds.has(selectedNode.id)}
-              canRegenerate={canFork && !streamingNodeIds.has(selectedNode.id)}
+              canDelete={canDeleteSelected}
+              canRegenerate={canRegenerateSelected}
               onDelete={() => requestDeleteSubtree(selectedNode.id)}
               onRegenerate={() => requestRegenerateFork(selectedNode.id)}
             />
           )}
           {selectedEdge && !selectedNode && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/30 px-8 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              <span>
-                Q ·{' '}
-                <span className="text-foreground/80">
-                  {selectedEdge.prompt.length} {t.detail.chars}
-                </span>
-              </span>
-              <span>{formatAbsoluteTime(selectedEdge.createdAt)}</span>
-              <button
-                type="button"
-                disabled={!canFork || editingEdgeId === selectedEdge.id}
-                onClick={() => beginEditPrompt(selectedEdge)}
-                title={
-                  !provider
-                    ? t.detail.forkUnavailableNoProvider
-                    : blockedByOtherSession
-                      ? t.detail.forkUnavailableBlocked
-                      : t.detail.editForkHint
-                }
-                className="ml-auto flex items-center gap-1 rounded-[2px] border border-transparent px-1.5 py-px text-accent transition-colors hover:enabled:border-accent/50 hover:enabled:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <GitFork className="h-3 w-3" />
-                <span>{t.detail.editFork}</span>
-              </button>
+            <EdgeMetaStrip prompt={selectedEdge.prompt} createdAt={selectedEdge.createdAt} />
+          )}
+          {selectedNode && selectedNode.role === 'root' && (
+            <div className="px-4 py-1.5 font-display text-[12px] italic text-muted-foreground/80">
+              {t.detail.rootDescription}
             </div>
           )}
-
-          <div className="qa-detail-scroll flex-1 overflow-y-auto px-10 py-6">
-            {selectedNode && selectedNode.role !== 'root' && (
-              <div className="space-y-4">
-                {resolveStructuredErrorText(selectedNode.structuredError, t.answer) && (
-                  <div className="rounded-[2px] border border-hairline/60 bg-secondary/40 px-3 py-2 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground">
-                    ⚠ {resolveStructuredErrorText(selectedNode.structuredError, t.answer)}
-                  </div>
-                )}
-                {selectedNode.structured?.title && (
-                  <h2
-                    className="font-display text-[20px] italic leading-tight text-foreground"
-                    style={{ fontFeatureSettings: '"ss01"' }}
-                  >
-                    {selectedNode.structured.title}
-                  </h2>
-                )}
-                {selectedNode.structured?.summary && (
-                  <p className="qa-prose-summary text-[13.5px] italic leading-[1.6] text-muted-foreground">
-                    {selectedNode.structured.summary}
-                  </p>
-                )}
-                <Markdown content={selectedNode.content || t.detail.emptyNodeMarkdown} />
-              </div>
-            )}
-            {selectedNode && selectedNode.role === 'root' && (
-              <p className="font-display text-[14px] italic text-muted-foreground">
-                {t.detail.rootDescription}
-              </p>
-            )}
-            {selectedEdge && !selectedNode && (
-              <div>
-                {editingEdgeId === selectedEdge.id ? (
-                  <div className="space-y-3">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                      {t.detail.editForkBannerTitle}
-                    </p>
-                    <textarea
-                      ref={editTextareaRef}
-                      rows={4}
-                      value={editDraft}
-                      onChange={(e) => setEditDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                          e.preventDefault();
-                          void submitEditPrompt();
-                        } else if (e.key === 'Escape') {
-                          e.preventDefault();
-                          cancelEditPrompt();
-                        }
-                      }}
-                      className={cn(
-                        'w-full resize-y rounded-[2px] border border-accent/40 bg-background/60 px-3 py-2',
-                        'text-[14px] leading-[1.55] text-foreground outline-none focus:border-accent',
-                      )}
-                      style={{ fontFamily: 'var(--font-display)' }}
-                      placeholder={t.detail.editForkPlaceholder}
-                    />
-                    <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                      <span className="text-foreground/70">{t.detail.editForkHint}</span>
-                      <button
-                        type="button"
-                        onClick={cancelEditPrompt}
-                        className="ml-auto rounded-[2px] border border-hairline/60 px-2 py-1 text-muted-foreground hover:border-hairline hover:text-foreground"
-                      >
-                        {t.common.cancel}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void submitEditPrompt()}
-                        disabled={!provider || editDraft.trim().length === 0}
-                        className={cn(
-                          'flex items-center gap-1 rounded-[2px] border px-2 py-1',
-                          'border-accent/60 text-accent hover:enabled:bg-accent hover:enabled:text-accent-foreground',
-                          'disabled:cursor-not-allowed disabled:opacity-40',
-                        )}
-                      >
-                        {t.detail.editForkSubmit}
-                        <span className="flex items-center gap-0.5 text-[9px] tracking-[0.22em] opacity-60">
-                          ⌘<CornerDownLeft className="h-2.5 w-2.5" />
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <p className="qa-prose-prompt">{selectedEdge.prompt}</p>
-                    <div className="mt-6 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                      <span>→</span>
-                      <button
-                        type="button"
-                        className="text-foreground hover:text-accent hover:underline underline-offset-2"
-                        onClick={() => selectNode(selectedEdge.toNodeId)}
-                      >
-                        {t.detail.jumpTarget} A{trail.filter((s) => s.kind === 'node').length}
-                      </button>
-                      <button
-                        type="button"
-                        className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                        onClick={() => selectEdge(null)}
-                      >
-                        {t.detail.cancelSelection} <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
         </div>
       )}
-
     </div>
   );
 }
 
 function NodeMetaStrip({
   node,
-  canDelete,
   streaming,
+  canDelete,
   canRegenerate,
   onDelete,
   onRegenerate,
 }: {
   node: QANode;
-  canDelete: boolean;
   streaming: boolean;
+  canDelete: boolean;
   canRegenerate: boolean;
   onDelete: () => void;
   onRegenerate: () => void;
@@ -414,13 +213,18 @@ function NodeMetaStrip({
   const { t } = useI18n();
   const tokens = formatTokenUsage(node.tokenUsage);
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/30 px-8 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
       <span>
         MODEL · <span className="text-foreground/80">{node.model ?? 'unknown'}</span>
       </span>
       {tokens && <span className="text-foreground/80">{tokens}</span>}
       <span>{formatAbsoluteTime(node.createdAt)}</span>
-      <span className={cn('rounded-[2px] border px-1.5 py-px text-[9px]', STATUS_BADGE_STYLE[node.status])}>
+      <span
+        className={cn(
+          'rounded-[2px] border px-1.5 py-px text-[9px]',
+          STATUS_BADGE_STYLE[node.status],
+        )}
+      >
         {STATUS_LABEL[node.status]}
       </span>
       {node.errorMessage && (
@@ -456,6 +260,30 @@ function NodeMetaStrip({
         <Trash2 className="h-3 w-3" />
         <span>{t.answer.deleteSubtree}</span>
       </button>
+    </div>
+  );
+}
+
+function EdgeMetaStrip({
+  prompt,
+  createdAt,
+}: {
+  prompt: string;
+  createdAt: number;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+      <span>
+        Q ·{' '}
+        <span className="text-foreground/80">
+          {prompt.length} {t.detail.chars}
+        </span>
+      </span>
+      <span>{formatAbsoluteTime(createdAt)}</span>
+      <span className="font-display text-[10.5px] italic normal-case tracking-normal text-muted-foreground/70">
+        ↳ {t.detail.editForkHint}
+      </span>
     </div>
   );
 }
